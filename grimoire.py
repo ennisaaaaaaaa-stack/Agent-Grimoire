@@ -209,6 +209,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_text(200, "ok")
         if self.path == "/map":
             return self.send_text(200, render_map())
+        if self.path == "/darkzone":
+            return self.get_darkzone()
         m = re.match(r"^/tag/([^/]+)$", self.path)
         if m:
             return self.get_tag(urllib.parse.unquote(m.group(1)))
@@ -217,9 +219,51 @@ class Handler(BaseHTTPRequestHandler):
             return self.get_skill(urllib.parse.unquote(m.group(1)))
         return self.send_text(404, "not found")
 
+    def canonical_tag(self, con, tag):
+        """别名归并: 查询侧把别名折叠到正字tag(repair≈维修)。可逆, 树不长胖。"""
+        for r in rows(con.execute(
+                "SELECT tag, aliases FROM tags WHERE aliases IS NOT NULL"
+                ).fetchall()):
+            if tag == r["tag"]:
+                return r["tag"]
+            for a in (json.loads(r["aliases"]) if r["aliases"] else []):
+                if tag == a:
+                    return r["tag"]
+        return tag
+
+    def get_darkzone(self):
+        """暗区点名(机械半边): 从未被push/expand过的skill名单。
+        出口必须带全量名单——暗区skill是唯一没有遥测数据替它们说话的,
+        名单是它们的保底。逐本判断仍是巡山使的活。"""
+        con = db()
+        try:
+            names = set()
+            for r in rows(con.execute(
+                    "SELECT payload FROM events WHERE kind IN "
+                    "('skill.telemetry.push','skill.telemetry.expand')"
+                    ).fetchall()):
+                p = json.loads(r["payload"])
+                v = p.get("skill_id") or p.get("name")
+                if v:
+                    names.add(v)
+            out = []
+            for r in rows(con.execute(
+                    "SELECT s.skill_id, s.name, s.layer, s.status "
+                    "FROM skills s WHERE s.status != 'retired' "
+                    "ORDER BY s.name").fetchall()):
+                if r["name"] not in names and r["skill_id"] not in names:
+                    out.append(f"{r['name']}  [{r['layer']}/{r['status']}]")
+            body = "暗区点名(从未被push/expand):\n" + ("\n".join(out)
+                    if out else "(空——没有暗区skill)")
+            body += "\n\n出口提醒: 名单是机械的, 逐本判断仍是巡山使的活。"
+            return self.send_text(200, body)
+        finally:
+            con.close()
+
     def get_tag(self, tag):
         con = db()
         try:
+            tag = self.canonical_tag(con, tag)  # 查询侧归并: 别名折叠到正字
             out = []
             for r in rows(con.execute(
                     "SELECT s.skill_id, s.name, s.layer, s.status, f.value AS tags "
@@ -248,7 +292,16 @@ class Handler(BaseHTTPRequestHandler):
         con = db()
         try:
             row = con.execute(
-                "SELECT * FROM skills WHERE skill_id = ? OR name = ?", (skill_id, skill_id)).fetchone()
+                "SELECT * FROM skills WHERE skill_id = ? OR name = ?",
+                (skill_id, skill_id)).fetchone()
+            if not row:
+                # 名字别名也认(查询侧折叠, 与tag别名同一模式)
+                esc = skill_id.replace('"', '\\"')
+                row = con.execute(
+                    "SELECT s.* FROM skills s JOIN skill_fields f "
+                    "ON f.skill_id = s.skill_id AND f.field = 'aliases' "
+                    "WHERE f.value LIKE ?",
+                    (f'%"{esc}"%',)).fetchone()
             if not row:
                 return self.send_text(404, "not found")
             if row["status"] == "retired" and \
@@ -258,7 +311,7 @@ class Handler(BaseHTTPRequestHandler):
             flds = {}
             for f in rows(con.execute(
                     "SELECT field, value FROM skill_fields WHERE skill_id = ?",
-                    (skill_id,)).fetchall()):
+                    (row["skill_id"],)).fetchall()):
                 flds[f["field"]] = (json.loads(f["value"])
                                     if f["field"] in ("tags", "aliases")
                                     else f["value"])
@@ -270,7 +323,7 @@ class Handler(BaseHTTPRequestHandler):
                     f"why: {flds.get('why', '')}\n\n")
             tail = ("\n\n---\n用完顺手记一笔: POST /event "
                     '{"kind":"skill.telemetry.expand","operator":"<你>","skill_id":"'
-                    f'{skill_id}' + '"} — 好用/没用, 你判断.)')
+                    f'{row["name"]}' + '"} — 好用/没用, 你判断.)')
             return self.send_text(200, head + row["body"] + tail)
         finally:
             con.close()
@@ -453,6 +506,11 @@ class Handler(BaseHTTPRequestHandler):
                         "INSERT OR REPLACE INTO skill_fields"
                         "(skill_id, field, value) VALUES(?,?,?)",
                         (sid, field, json.dumps(val, ensure_ascii=False)))
+                # 山系自动生长: 挂不进现有山的tag在submit时自动种成平铺山根
+                # (契约tag卫生规则1: 新skill优先挂现有tag; 门槛是门槛, 长山是长山)
+                for t in tags_list:
+                    con.execute(
+                        "INSERT OR IGNORE INTO tags(tag) VALUES(?)", (t,))
                 # 扫描坛建藏书阁门口: draft起步, 报告挂上, 写入畅通
                 findings = scan_skill(con, name, skill_body, exclude_id=sid)
                 for f in findings:

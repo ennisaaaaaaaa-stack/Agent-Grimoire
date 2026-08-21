@@ -30,9 +30,10 @@ CREATE TABLE IF NOT EXISTS skill_fields (
 
 -- tag树（山系）。包含关系 = parent缩进，树在渲染时长出来。
 CREATE TABLE IF NOT EXISTS tags (
-  tag    TEXT PRIMARY KEY,
-  parent TEXT REFERENCES tags(tag),        -- NULL = 山根
-  note   TEXT
+  tag     TEXT PRIMARY KEY,
+  parent  TEXT REFERENCES tags(tag),        -- NULL = 山根
+  aliases TEXT,                             -- JSON数组; 查询侧归并到正字(repair≈维修), 不占树位, 可逆
+  note    TEXT
 );
 
 -- 前置表: 左边是右边的前提。requires 可以是skill_id也可以是tag。

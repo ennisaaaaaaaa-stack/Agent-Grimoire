@@ -127,6 +127,27 @@ check("经图刷新即真(新skill进映射)", "归还术-扫描修复流程" in
 s, b = post("/skill", {"name": "归还术-扫描修复流程", "body": "x"})
 check("同名挡(409, 改写走rewrite)", s == 409)
 
+# 10. 山系自动生长: submit带过的tag已种进树
+s, b = get("/map")
+check("tag自动种山(维修/流程/测试进树)",
+      s == 200 and "维修" in b and "流程" in b and "测试" in b)
+
+# 11. 暗区点名: 毒草/重复的书从未被push/expand→在暗区; 归还术被expand过→不在
+s, b = get("/darkzone")
+check("暗区点名(毒草在, 归还术不在)",
+      s == 200 and "毒草-测试用" in b and "归还术" not in b
+      and "逐本判断" in b)
+
+# 12. 别名折叠: repair→维修 (查询侧归并, 直接登记别名后用旧词查)
+import sqlite3
+con = sqlite3.connect("/home/ubuntu/Agent-Grimoire/grimoire.db")
+con.execute("UPDATE tags SET aliases=? WHERE tag='维修'",
+            (json.dumps(["repair", "修bug"], ensure_ascii=False),))
+con.commit()
+con.close()
+s, b = get("/tag/repair")
+check("别名折叠(repair查到维修山)", s == 200 and "归还术" in b, b[:120])
+
 fails = [r for r in results if not r[1]]
 print(f"\n{len(results) - len(fails)}/{len(results)} 绿")
 sys.exit(1 if fails else 0)
