@@ -18,18 +18,26 @@ import hashlib
 import threading
 import time
 import urllib.parse
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DB = "/home/ubuntu/Agent-Grimoire/grimoire.db"
 SCHEMA = "/home/ubuntu/Agent-Grimoire/schema.sql"
 LISTEN_HOST = "127.0.0.1"
 
-EVENT_KINDS = {
-    "skill.submit",
-    "skill.push",
-    "skill.expand",
-    "skill.description.rewrite",
+# 契约 v0.2 域6全量事件（skill.checkin.scan 由提交路径内部落账，不经 POST /event）
+TELEMETRY_KINDS = {          # 只记不动：遥测永远不触发变更
+    "skill.telemetry.push",
+    "skill.telemetry.expand",
 }
+GOVERNANCE_KINDS = {         # 写脸：策展动作，动作+落账一起（契约"落盘动作走管理工具，全部产生账本事件"）
+    "skill.pool.review",     # decision: promoted|discarded
+    "skill.roster.update",   # layer: core|index|archive
+    "skill.tag.merge",       # old_tag -> new_tag
+    "skill.prereq.update",   # 边增删
+    "skill.description.rewrite",  # 改写绑 baseline_hash，不符→409 stale
+}
+EVENT_KINDS = TELEMETRY_KINDS | GOVERNANCE_KINDS
 
 _lock = threading.Lock()
 
@@ -100,18 +108,32 @@ def render_map():
                 lines.append(f"{p['requires']} ⇒ {p['target']}（理由：{p['reason']}）")
             lines.append("")
 
+        # core层全文常驻 (契约: core=保底常驻, 每session全文)
+        core_rows = con.execute(
+            "SELECT s.skill_id, s.name, s.body FROM skills s "
+            "WHERE s.layer = 'core' AND s.status != 'retired' "
+            "ORDER BY s.name").fetchall()
+        if core_rows:
+            lines.append("## core层全文常驻")
+            for c in rows(core_rows):
+                lines.append(f"### {c['name']}")
+                lines.append(c["body"])
+                lines.append("")
+
         mapping = con.execute(
-            "SELECT s.skill_id, s.name, s.tier, s.status, f.value AS tags "
+            "SELECT s.name, s.layer, f.value AS tags "
             "FROM skills s LEFT JOIN skill_fields f "
             "ON f.skill_id = s.skill_id AND f.field = 'tags' "
-            "WHERE s.tier != 'archive' AND s.status != 'retired' "
+            "WHERE s.layer != 'archive' AND s.status != 'retired' "
             "ORDER BY s.name").fetchall()
         if mapping:
-            lines.append("## tag↔skill 映射")
+            by_tag = {}
             for m in rows(mapping):
-                taglist = json.loads(m["tags"]) if m["tags"] else []
-                lines.append(
-                    f"{m['skill_id']}  [{m['tier']}/{m['status']}]  {','.join(taglist)}")
+                for t in (json.loads(m["tags"]) if m["tags"] else []):
+                    by_tag.setdefault(t, []).append(m["name"])
+            lines.append("## tag↔skill 映射")
+            for t in sorted(by_tag):
+                lines.append(f"{t}: {', '.join(by_tag[t])}")
             lines.append("")
         return "\n".join(lines)
     finally:
@@ -200,10 +222,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             out = []
             for r in rows(con.execute(
-                    "SELECT s.skill_id, s.tier, s.status, f.value AS tags "
+                    "SELECT s.skill_id, s.name, s.layer, s.status, f.value AS tags "
                     "FROM skills s LEFT JOIN skill_fields f "
                     "ON f.skill_id = s.skill_id AND f.field = 'tags' "
-                    "WHERE s.tier != 'archive' AND s.status != 'retired' "
+                    "WHERE s.layer != 'archive' AND s.status != 'retired' "
                     "ORDER BY s.name").fetchall()):
                 taglist = json.loads(r["tags"]) if r["tags"] else []
                 if tag in taglist or tag in [t.lower() for t in taglist]:
@@ -214,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
                     desc = ""
                     if trig and trig["value"]:
                         desc = trig["value"].splitlines()[0][:120]
-                    out.append(f"{r['skill_id']}  [{r['tier']}/{r['status']}]  {desc}")
+                    out.append(f"{r['name']}  [{r['layer']}/{r['status']}]  {desc}")
             if not out:
                 return self.send_text(404, f"tag '{tag}' 下暂无在馆条目")
             return self.send_text(
@@ -226,7 +248,7 @@ class Handler(BaseHTTPRequestHandler):
         con = db()
         try:
             row = con.execute(
-                "SELECT * FROM skills WHERE skill_id = ?", (skill_id,)).fetchone()
+                "SELECT * FROM skills WHERE skill_id = ? OR name = ?", (skill_id, skill_id)).fetchone()
             if not row:
                 return self.send_text(404, "not found")
             if row["status"] == "retired" and \
@@ -241,13 +263,13 @@ class Handler(BaseHTTPRequestHandler):
                                     if f["field"] in ("tags", "aliases")
                                     else f["value"])
             head = (f"# {row['name']}\n"
-                    f"tier: {row['tier']}  status: {row['status']}\n"
+                    f"layer: {row['layer']}  status: {row['status']}\n"
                     f"tags: {flds.get('tags', [])}\n"
                     f"trigger: {flds.get('trigger', '')}\n"
                     f"boundary: {flds.get('boundary', '')}\n"
                     f"why: {flds.get('why', '')}\n\n")
             tail = ("\n\n---\n用完顺手记一笔: POST /event "
-                    '{"kind":"skill.expand","operator":"<你>","skill_id":"'
+                    '{"kind":"skill.telemetry.expand","operator":"<你>","skill_id":"'
                     f'{skill_id}' + '"} — 好用/没用, 你判断.)')
             return self.send_text(200, head + row["body"] + tail)
         finally:
@@ -272,18 +294,126 @@ class Handler(BaseHTTPRequestHandler):
         con = db()
         try:
             with _lock:
-                con.execute(
-                    "INSERT INTO events(ts, operator, kind, payload) "
-                    "VALUES(?,?,?,?)",
-                    (now(), operator, kind,
-                     json.dumps(body, ensure_ascii=False)))
-                con.commit()
-            return self.send_text(200, "已落账。只记不动: 账本不触发任何变更。")
+                # 遥测: 只记不动。治理: 动作+落账一体。
+                if kind in TELEMETRY_KINDS:
+                    con.execute(
+                        "INSERT INTO events(ts, operator, kind, payload) "
+                        "VALUES(?,?,?,?)",
+                        (now(), operator, kind,
+                         json.dumps(body, ensure_ascii=False)))
+                    con.commit()
+                    return self.send_text(200, "已落账。只记不动: 账本不触发任何变更。")
+
+                resp = self.govern(con, kind, operator, body)
+                if resp[0] < 300:  # 动作成功才落账
+                    con.execute(
+                        "INSERT INTO events(ts, operator, kind, payload) "
+                        "VALUES(?,?,?,?)",
+                        (now(), operator, kind,
+                         json.dumps(body, ensure_ascii=False)))
+                    con.commit()
+                return self.send_json(resp[0], resp[1])
         except sqlite3.Error as e:
             con.rollback()
             return self.send_text(500, f"ledger write failed: {e}")
         finally:
             con.close()
+
+    def govern(self, con, kind, operator, body):
+        """巡山使写脸: 执行治理动作。返回 (http_code, payload)。"""
+        sid = body.get("skill_id")
+
+        def get_skill_row():
+            return con.execute(
+                "SELECT skill_id, layer, status, baseline_hash FROM skills "
+                "WHERE skill_id = ? OR name = ?", (sid, sid or "")).fetchone()
+
+        if kind == "skill.pool.review":
+            row = get_skill_row()
+            if not row:
+                return 404, {"error": f"skill不存在: {sid}"}
+            decision = body.get("decision")
+            if decision not in ("promoted", "discarded"):
+                return 400, {"error": "decision须为 promoted|discarded"}
+            # 红标draft转正需过目——巡山使签名即过目, 但红标在案时payload须带ack
+            reds = con.execute(
+                "SELECT COUNT(*) FROM scan_reports WHERE skill_id=? "
+                "AND severity='red'", (row["skill_id"],)).fetchone()[0]
+            if reds and not body.get("ack_red"):
+                return 409, {"error": "该skill带red入关报告, 转正须带 ack_red: true(过目签名)"}
+            new_status = "verified" if decision == "promoted" else "retired"
+            con.execute("UPDATE skills SET status=?, updated_at=? WHERE skill_id=?",
+                        (new_status, now(), row["skill_id"]))
+            return 200, {"skill_id": row["skill_id"], "status": new_status,
+                         "red_reports": reds}
+
+        if kind == "skill.roster.update":
+            row = get_skill_row()
+            if not row:
+                return 404, {"error": f"skill不存在: {sid}"}
+            layer = body.get("layer")
+            if layer not in ("core", "index", "archive"):
+                return 400, {"error": "layer须为 core|index|archive"}
+            con.execute("UPDATE skills SET layer=?, updated_at=? WHERE skill_id=?",
+                        (layer, now(), row["skill_id"]))
+            return 200, {"skill_id": row["skill_id"], "layer": layer}
+
+        if kind == "skill.description.rewrite":
+            row = get_skill_row()
+            if not row:
+                return 404, {"error": f"skill不存在: {sid}"}
+            if body.get("baseline_hash") != row["baseline_hash"]:
+                return 409, {"error": "baseline_hash不符(stale)",
+                             "current_baseline": row["baseline_hash"],
+                             "hint": "基线已被别人改过, 重读再改"}
+            new_trigger = body.get("trigger")
+            if not new_trigger:
+                return 400, {"error": "缺trigger"}
+            con.execute(
+                "INSERT OR REPLACE INTO skill_fields(skill_id, field, value) "
+                "VALUES(?,?,?)", (row["skill_id"], "trigger", new_trigger))
+            return 200, {"skill_id": row["skill_id"],
+                         "trigger_head": new_trigger[:80],
+                         "baseline_hash": row["baseline_hash"]}
+
+        if kind == "skill.tag.merge":
+            old_tag, new_tag = body.get("old_tag"), body.get("new_tag")
+            if not old_tag or not new_tag:
+                return 400, {"error": "缺old_tag/new_tag"}
+            moved = 0
+            for r in rows(con.execute(
+                    "SELECT skill_id, value FROM skill_fields "
+                    "WHERE field='tags'").fetchall()):
+                tags = json.loads(r["value"])
+                if old_tag in tags:
+                    tags = [t for t in tags if t != old_tag] + [new_tag]
+                    con.execute(
+                        "UPDATE skill_fields SET value=? "
+                        "WHERE skill_id=? AND field='tags'",
+                        (json.dumps(tags, ensure_ascii=False), r["skill_id"]))
+                    moved += 1
+            con.execute("DELETE FROM tags WHERE tag=?", (old_tag,))
+            return 200, {"old_tag": old_tag, "new_tag": new_tag, "skills_moved": moved}
+
+        if kind == "skill.prereq.update":
+            edge, action, reason = (body.get("edge"), body.get("action"),
+                                    body.get("reason"))
+            if not edge or action not in ("add", "remove") or not reason:
+                return 400, {"error": "缺edge/action(add|remove)/reason"}
+            requires, _, target = edge.partition("=>")
+            if not target:
+                return 400, {"error": "edge格式: 'B C D E => A'"}
+            requires, target = requires.strip(), target.strip()
+            if action == "add":
+                con.execute(
+                    "INSERT OR REPLACE INTO prereqs(target, requires, reason) "
+                    "VALUES(?,?,?)", (target, requires, reason))
+            else:
+                con.execute("DELETE FROM prereqs WHERE target=? AND requires=?",
+                            (target, requires))
+            return 200, {"edge": edge, "action": action}
+
+        return 500, {"error": f"unhandled kind: {kind}"}
 
     def post_skill(self):
         try:
@@ -305,9 +435,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_text(
                         409, f"同名skill已在馆: {existing['skill_id']} — "
                              "改写走 skill.description.rewrite 事件 + 巡山使")
-                sid = slugify(name)
+                sid = "sk:" + uuid.uuid4().hex[:12]
                 con.execute(
-                    "INSERT INTO skills(skill_id, name, tier, status, author, "
+                    "INSERT INTO skills(skill_id, name, layer, status, author, "
                     "source, imported_at, body, baseline_hash, "
                     "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                     (sid, name, "index", "draft",
@@ -336,14 +466,22 @@ class Handler(BaseHTTPRequestHandler):
                     "INSERT INTO events(ts, operator, kind, payload) "
                     "VALUES(?,?,?,?)",
                     (now(), body.get("operator") or body.get("author") or "unknown",
-                     "skill.submit",
+                     "skill.pool.submit",
                      json.dumps({"skill_id": sid, "name": name,
                                  "tags": tags_list,
                                  "scan_findings": len(findings)},
                                 ensure_ascii=False)))
+                if findings:  # 契约v0.2: 入关报告落账 skill.checkin.scan
+                    con.execute(
+                        "INSERT INTO events(ts, operator, kind, payload) "
+                        "VALUES(?,?,?,?)",
+                        (now(), "grimoire-scan", "skill.checkin.scan",
+                         json.dumps({"skill_id": sid,
+                                     "findings_summary": findings},
+                                    ensure_ascii=False)))
                 con.commit()
                 resp = {"skill_id": sid, "status": "draft",
-                        "tier": "index",
+                        "layer": "index",
                         "scan": {"count": len(findings)}}
                 if findings:
                     resp["scan"]["findings"] = findings

@@ -87,24 +87,37 @@ check("重复正文→duplicate面红(归一化命中)", any(
     f.get("face") == "duplicate" and f.get("severity") == "red"
     for f in d3.get("scan", {}).get("findings", [])), b[:200])
 
-# 5. 按tag拉条目(含首行描述)
+# 5. 按tag拉条目(含首行描述) — skill_id已是sk:<uuid>, 经图/检索按name认人
 s, b = get("/tag/维修")
 check("tag拉条目带描述行", s == 200 and "归还术" in b and "想把这个修法存下来" in b, b[:150])
 s, b = get("/tag/不存在的山")
 check("空tag=404不炸", s == 404)
 
-# 6. 取正文 + 搭车提醒在尾部
+# 6. 取正文 + 搭车提醒在尾部 (按name可取)
 s, b = get("/skill/归还术-扫描修复流程")
 check("正文可取+尾行搭车提醒", s == 200 and "归还术" in b and "顺手记一笔" in b, b[-120:])
 
-# 7. 遥测落账 (expand + push)
-s, b = post("/event", {"kind": "skill.expand", "operator": "hui",
+# 7. 遥测落账 (expand + push) — 契约正字名
+s, b = post("/event", {"kind": "skill.telemetry.expand", "operator": "hui",
                        "skill_id": "归还术-扫描修复流程", "verdict": "好用"})
 check("expand事件落账", s == 200)
-s, b = post("/event", {"kind": "skill.push", "operator": "hui", "map_lines": 12})
+s, b = post("/event", {"kind": "skill.telemetry.push", "operator": "hui", "map_lines": 12})
 check("push事件落账", s == 200)
 s, b = post("/event", {"kind": "skill.nuke-everything", "operator": "evil"})
 check("未知kind被拒(账本不吃野事件)", s == 400)
+
+# 7.5 巡山使写脸: review转正 + roster层移 + rewrite绑baseline
+s, b = post("/event", {"kind": "skill.pool.review", "operator": "巡山使",
+                       "skill_id": "归还术-扫描修复流程", "decision": "promoted"})
+check("review转正(draft→verified)", s == 200 and "verified" in b, b[:120])
+s, b = post("/event", {"kind": "skill.roster.update", "operator": "巡山使",
+                       "skill_id": "归还术-扫描修复流程", "layer": "core"})
+check("roster层移(index→core)", s == 200 and "core" in b, b[:120])
+s, b = post("/event", {"kind": "skill.description.rewrite", "operator": "巡山使",
+                       "skill_id": "归还术-扫描修复流程",
+                       "trigger": "刚修完bug想把修法存下来下次用时",
+                       "baseline_hash": "WRONG"})
+check("rewrite绑baseline, 错hash=409 stale", s == 409, b[:120])
 
 # 8. 经图刷新后含新条目 (单一事实源: 不做第二份数据库, 刷新即真)
 s, b = get("/map")
