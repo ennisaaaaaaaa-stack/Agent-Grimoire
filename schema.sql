@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS skills (
   skill_id      TEXT PRIMARY KEY,          -- sk:<uuid>，契约v0.2正字格式
   name          TEXT NOT NULL UNIQUE,
   layer         TEXT NOT NULL DEFAULT 'index'
-                CHECK(layer IN ('core','index','archive')),   -- 对齐域6 layer枚举
+                -- 对齐域6 layer枚举; pinned=描述行常驻(core=index之间的注水层,
+                -- 每session必知但正文太重的书: 描述行进经图, 正文按需拉)
+                CHECK(layer IN ('core','pinned','index','archive')),
   status        TEXT NOT NULL DEFAULT 'draft'
                 CHECK(status IN ('draft','verified','retired')),
   author        TEXT NOT NULL,             -- 提交者身份
