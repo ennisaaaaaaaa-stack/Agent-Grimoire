@@ -233,6 +233,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def get_darkzone(self):
         """暗区点名(机械半边): 从未被push/expand过的skill名单。
+        archive层除外——它们已被巡山使判过, 点名是给还没被判断的书的保底。
         出口必须带全量名单——暗区skill是唯一没有遥测数据替它们说话的,
         名单是它们的保底。逐本判断仍是巡山使的活。"""
         con = db()
@@ -250,6 +251,7 @@ class Handler(BaseHTTPRequestHandler):
             for r in rows(con.execute(
                     "SELECT s.skill_id, s.name, s.layer, s.status "
                     "FROM skills s WHERE s.status != 'retired' "
+                    "AND s.layer != 'archive' "
                     "ORDER BY s.name").fetchall()):
                 if r["name"] not in names and r["skill_id"] not in names:
                     out.append(f"{r['name']}  [{r['layer']}/{r['status']}]")
@@ -320,7 +322,8 @@ class Handler(BaseHTTPRequestHandler):
                     f"tags: {flds.get('tags', [])}\n"
                     f"trigger: {flds.get('trigger', '')}\n"
                     f"boundary: {flds.get('boundary', '')}\n"
-                    f"why: {flds.get('why', '')}\n\n")
+                    f"why: {flds.get('why', '')}\n"
+                    f"baseline_hash: {row['baseline_hash']}\n\n")
             tail = ("\n\n---\n用完顺手记一笔: POST /event "
                     '{"kind":"skill.telemetry.expand","operator":"<你>","skill_id":"'
                     f'{row["name"]}' + '"} — 好用/没用, 你判断.)')
