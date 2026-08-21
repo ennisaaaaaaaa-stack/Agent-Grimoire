@@ -130,7 +130,12 @@ def render_map():
         if pinned_rows:
             lines.append("## pinned层描述行")
             for p in rows(pinned_rows):
-                desc = (p["trigger"] or "").strip().splitlines()[0] if p["trigger"] else ""
+                raw = p["trigger"] or '""'
+                try:
+                    raw = json.loads(raw)  # trigger按json.dumps存, 解包引号
+                except (ValueError, TypeError):
+                    pass
+                desc = (raw or "").strip().splitlines()[0] if raw else ""
                 lines.append(f"{p['name']}: {desc}")
 
         mapping = con.execute(
