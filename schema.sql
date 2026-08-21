@@ -4,10 +4,10 @@
 
 -- 技能条目（异兽志的每一兽）
 CREATE TABLE IF NOT EXISTS skills (
-  skill_id      TEXT PRIMARY KEY,          -- 稳定slug，提交时由name生成
+  skill_id      TEXT PRIMARY KEY,          -- sk:<uuid>，契约v0.2正字格式
   name          TEXT NOT NULL UNIQUE,
-  tier          TEXT NOT NULL DEFAULT 'index'
-                CHECK(tier IN ('core','index','archive')),
+  layer         TEXT NOT NULL DEFAULT 'index'
+                CHECK(layer IN ('core','index','archive')),   -- 对齐域6 layer枚举
   status        TEXT NOT NULL DEFAULT 'draft'
                 CHECK(status IN ('draft','verified','retired')),
   author        TEXT NOT NULL,             -- 提交者身份
