@@ -119,6 +119,19 @@ def render_map():
                 lines.append(f"### {c['name']}")
                 lines.append(c["body"])
                 lines.append("")
+        # pinned层描述行常驻 (core=index之间的注水层: 每session必知但正文太重;
+        # 经图里带一行描述, 正文按需拉。描述行读trigger字段。)
+        pinned_rows = con.execute(
+            "SELECT s.name, f.value AS trigger FROM skills s "
+            "JOIN skill_fields f ON f.skill_id = s.skill_id "
+            "AND f.field = 'trigger' "
+            "WHERE s.layer = 'pinned' AND s.status != 'retired' "
+            "ORDER BY s.name").fetchall()
+        if pinned_rows:
+            lines.append("## pinned层描述行")
+            for p in rows(pinned_rows):
+                desc = (p["trigger"] or "").strip().splitlines()[0] if p["trigger"] else ""
+                lines.append(f"{p['name']}: {desc}")
 
         mapping = con.execute(
             "SELECT s.name, s.layer, f.value AS tags "
@@ -408,8 +421,8 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 return 404, {"error": f"skill不存在: {sid}"}
             layer = body.get("layer")
-            if layer not in ("core", "index", "archive"):
-                return 400, {"error": "layer须为 core|index|archive"}
+            if layer not in ("core", "pinned", "index", "archive"):
+                return 400, {"error": "layer须为 core|pinned|index|archive"}
             con.execute("UPDATE skills SET layer=?, updated_at=? WHERE skill_id=?",
                         (layer, now(), row["skill_id"]))
             return 200, {"skill_id": row["skill_id"], "layer": layer}
