@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """山海烟测 — 丝滑判据四查 + 扫描三面真触发。跑真HTTP, 不mock。"""
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-BASE = "http://127.0.0.1:8730"
+# 烟测自带隔离: 临时库 + 临时端口, 不碰 live (照照复刻部署时也不必手搬路径)
+_SMOKE_PORT = 18730
+BASE = f"http://127.0.0.1:{_SMOKE_PORT}"
 results = []
 
 
@@ -38,7 +42,16 @@ def post(path, obj):
         return e.code, e.read().decode()
 
 
-# 0. health
+# 0. 起隔离实例: 临时库 + 临时端口 (烟测自带隔离, 不碰 live)
+_tmpdir = tempfile.TemporaryDirectory(prefix="grimoire-smoke-")
+_srv = subprocess.Popen(
+    [sys.executable, "grimoire.py", str(_SMOKE_PORT)],
+    cwd="/home/ubuntu/Agent-Grimoire",
+    env={**os.environ, "GRIMOIRE_DB": _tmpdir.name + "/smoke.db"},
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(0.8)
+
+# 0.5 health
 s, b = get("/health")
 check("health", s == 200 and b == "ok", b)
 
@@ -119,6 +132,27 @@ s, b = post("/event", {"kind": "skill.description.rewrite", "operator": "巡山�
                        "baseline_hash": "WRONG"})
 check("rewrite绑baseline, 错hash=409 stale", s == 409, b[:120])
 
+# 7.6 凭证轮换 (照照首缺陷): 改写成功后 baseline_hash 必须换新,
+#     同一旧 hash 第二次 rewrite 必须被拒 — 防静默覆盖
+# 注: get() 内部会 quote 一次, 这里传裸路径 — 外层再 quote 会双重编码→404
+s, b = get("/skill/归还术-扫描修复流程")
+import re as _re
+import json as _json
+_m = _re.search(r"baseline_hash: ([0-9a-f]{64})", b)
+_cur = _m.group(1) if _m else ""
+s, b = post("/event", {"kind": "skill.description.rewrite", "operator": "巡山使",
+                       "skill_id": "归还术-扫描修复流程",
+                       "trigger": "刚修完bug想把修法存下来下次用时(轮换后)",
+                       "baseline_hash": _cur})
+check("rewrite成功返回新hash", s == 200 and _json.loads(b)["baseline_hash"] != _cur, b[:120])
+s, b = post("/event", {"kind": "skill.description.rewrite", "operator": "evil",
+                       "skill_id": "归还术-扫描修复流程",
+                       "trigger": "B拿旧凭证覆盖A的改写",
+                       "baseline_hash": _cur})
+check("凭证轮换后旧hash开门=409(防双花)", s == 409, b[:120])
+s, b = get("/skill/归还术-扫描修复流程")  # 裸路径, get()内部quote一次即可
+check("A的改写仍在(未被覆盖)", s == 200 and "轮换后" in b)
+
 # 8. 经图刷新后含新条目 (单一事实源: 不做第二份数据库, 刷新即真)
 s, b = get("/map")
 check("经图刷新即真(新skill进映射)", "归还术-扫描修复流程" in b)
@@ -138,13 +172,10 @@ check("暗区点名(毒草在, 归还术不在)",
       s == 200 and "毒草-测试用" in b and "归还术" not in b
       and "逐本判断" in b)
 
-# 12. 别名折叠: repair→维修 (查询侧归并, 直接登记别名后用旧词查)
-import sqlite3
-con = sqlite3.connect("/home/ubuntu/Agent-Grimoire/grimoire.db")
-con.execute("UPDATE tags SET aliases=? WHERE tag='维修'",
-            (json.dumps(["repair", "修bug"], ensure_ascii=False),))
-con.commit()
-con.close()
+# 12. 别名折叠: repair→维修 (查询侧归并; 别名经治理面登记, 不直连库)
+s, b = post("/event", {"kind": "skill.tag.alias.add", "operator": "巡山使",
+                       "tag": "维修", "aliases": ["repair", "修bug"]})
+check("别名登记(治理面)", s == 200, b[:120])
 s, b = get("/tag/repair")
 check("别名折叠(repair查到维修山)", s == 200 and "归还术" in b, b[:120])
 

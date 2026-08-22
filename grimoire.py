@@ -12,6 +12,7 @@
 - 扫描坛建藏书阁门口: 所有写入统一过(含自梳理)
 """
 import json
+import os
 import re
 import sqlite3
 import hashlib
@@ -21,7 +22,7 @@ import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-DB = "/home/ubuntu/Agent-Grimoire/grimoire.db"
+DB = os.environ.get("GRIMOIRE_DB", "/home/ubuntu/Agent-Grimoire/grimoire.db")
 SCHEMA = "/home/ubuntu/Agent-Grimoire/schema.sql"
 LISTEN_HOST = "127.0.0.1"
 
@@ -34,6 +35,7 @@ GOVERNANCE_KINDS = {         # 写脸：策展动作，动作+落账一起（契
     "skill.pool.review",     # decision: promoted|discarded
     "skill.roster.update",   # layer: core|index|archive
     "skill.tag.merge",       # old_tag -> new_tag
+    "skill.tag.alias.add",   # 登记别名 (查询侧折叠用)
     "skill.prereq.update",   # 边增删
     "skill.description.rewrite",  # 改写绑 baseline_hash，不符→409 stale
 }
@@ -568,18 +570,44 @@ class Handler(BaseHTTPRequestHandler):
             new_trigger = body.get("trigger")
             if not new_trigger:
                 return 400, {"error": "缺trigger"}
+            # 凭证轮换: 改写成功后 baseline_hash 换新 (sha(新trigger||旧hash)),
+            # B 拿 A 改之前的旧凭证不能再开门 — 防静默覆盖 (照照审阅首缺陷)
+            old_hash = row["baseline_hash"]
+            new_hash = sha(new_trigger + old_hash)  # sha()内部encode, 勿传bytes
             con.execute(
                 "INSERT OR REPLACE INTO skill_fields(skill_id, field, value) "
                 "VALUES(?,?,?)", (row["skill_id"], "trigger", new_trigger))
+            con.execute(
+                "UPDATE skills SET baseline_hash=?, updated_at=? WHERE skill_id=?",
+                (new_hash, now(), row["skill_id"]))
             return 200, {"skill_id": row["skill_id"],
                          "trigger_head": new_trigger[:80],
-                         "baseline_hash": row["baseline_hash"]}
+                         "baseline_hash": new_hash}
+
+        if kind == "skill.tag.alias.add":
+            tag, aliases = body.get("tag"), body.get("aliases")
+            if not tag or not isinstance(aliases, list) or not aliases:
+                return 400, {"error": "缺tag/aliases(非空list)"}
+            row = con.execute(
+                "SELECT aliases FROM tags WHERE tag=?", (tag,)).fetchone()
+            have = json.loads(row["aliases"]) if row and row["aliases"] else []
+            merged = list(dict.fromkeys(have + [a for a in aliases
+                                                if a and a not in have]))
+            # tag不存在则先种山(治理面登记语义: 登记即入库, 无需先有书)
+            con.execute(
+                "INSERT OR IGNORE INTO tags(tag) VALUES(?)", (tag,))
+            con.execute(
+                "UPDATE tags SET aliases=? WHERE tag=?",
+                (json.dumps(merged, ensure_ascii=False), tag))
+            return 200, {"tag": tag, "aliases": merged,
+                         "added": [a for a in aliases if a not in have]}
 
         if kind == "skill.tag.merge":
             old_tag, new_tag = body.get("old_tag"), body.get("new_tag")
             if not old_tag or not new_tag:
                 return 400, {"error": "缺old_tag/new_tag"}
             moved = 0
+            merged_aliases = []
             for r in rows(con.execute(
                     "SELECT skill_id, value FROM skill_fields "
                     "WHERE field='tags'").fetchall()):
@@ -591,8 +619,25 @@ class Handler(BaseHTTPRequestHandler):
                         "WHERE skill_id=? AND field='tags'",
                         (json.dumps(tags, ensure_ascii=False), r["skill_id"]))
                     moved += 1
+            # aliases 迁移: 旧正字的别名併入新正字, 不隨山刪掉 (照照觀察項1)
+            old_row = con.execute(
+                "SELECT aliases FROM tags WHERE tag=?", (old_tag,)).fetchone()
+            if old_row and old_row["aliases"]:
+                merged_aliases = json.loads(old_row["aliases"])
+            new_row = con.execute(
+                "SELECT aliases FROM tags WHERE tag=?", (new_tag,)).fetchone()
+            if new_row and new_row["aliases"]:
+                have = json.loads(new_row["aliases"])
+                merged_aliases = list(dict.fromkeys(
+                    have + [a for a in merged_aliases if a not in have]))
+            con.execute(
+                "UPDATE tags SET aliases=? WHERE tag=?",
+                (json.dumps(merged_aliases, ensure_ascii=False)
+                 if merged_aliases else None, new_tag))
             con.execute("DELETE FROM tags WHERE tag=?", (old_tag,))
-            return 200, {"old_tag": old_tag, "new_tag": new_tag, "skills_moved": moved}
+            return 200, {"old_tag": old_tag, "new_tag": new_tag,
+                         "skills_moved": moved,
+                         "aliases_migrated": merged_aliases}
 
         if kind == "skill.prereq.update":
             edge, action, reason = (body.get("edge"), body.get("action"),
@@ -620,8 +665,9 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as e:
             return self.send_text(400, f"bad json: {e}")
         name = body.get("name")
-        if not name:
-            return self.send_text(400, "name总要有 (其余全可空)")
+        if not name or not str(name).strip():
+            return self.send_text(400, "缺name")
+        name = str(name).strip()  # 同名挡前後空格繞過: 入庫前 strip 一刀 (照照觀察項4)
         tags_list = body.get("tags") or []
         skill_body = body.get("body") or ""
         con = db()
@@ -731,8 +777,7 @@ def init_db():
 
 def main():
     import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "init":
-        return init_db()
+    init_db()  # 幂等 (CREATE TABLE IF NOT EXISTS): 空库自动建表, 烟测/新部署零仪式
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8730
     srv = ThreadingHTTPServer((LISTEN_HOST, port), Handler)
     print(f"grimoire serving on 127.0.0.1:{port}", flush=True)
