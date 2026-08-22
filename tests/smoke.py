@@ -49,6 +49,9 @@ _srv = subprocess.Popen(
     cwd="/home/ubuntu/Agent-Grimoire",
     env={**os.environ, "GRIMOIRE_DB": _tmpdir.name + "/smoke.db"},
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+# 隔离含拆除: 烟测退出(含中途崩)必杀server, 否则孤儿占口, 下一轮打到陈旧DB=状态依赖绿
+import atexit
+atexit.register(lambda: (_srv.terminate(), _srv.wait(timeout=5)))
 time.sleep(0.8)
 
 # 0.5 health
