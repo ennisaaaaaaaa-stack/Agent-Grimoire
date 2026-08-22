@@ -229,6 +229,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_text(200, render_map())
         if self.path == "/darkzone":
             return self.get_darkzone()
+        if self.path.split("?")[0] == "/stats":
+            since = urllib.parse.parse_qs(
+                urllib.parse.urlparse(self.path).query).get("since", [None])[0]
+            return self.send_text(200, self.get_stats(since))
         m = re.match(r"^/tag/([^/]+)$", self.path)
         if m:
             return self.get_tag(urllib.parse.unquote(m.group(1)))
@@ -277,6 +281,50 @@ class Handler(BaseHTTPRequestHandler):
                     if out else "(空——没有暗区skill)")
             body += "\n\n出口提醒: 名单是机械的, 逐本判断仍是巡山使的活。"
             return self.send_text(200, body)
+        finally:
+            con.close()
+
+    def get_stats(self, since=None):
+        """巡逻统计读面(收编自 tools/patrol_stats.py):
+        四数字全部端点化, 跨工具读数从此同源。
+        since=UTC时刻时加算上轮以来新增事件数。弱trigger判据与历次报告一致。"""
+        con = db()
+        try:
+            seen = set()
+            for r in rows(con.execute(
+                    "SELECT payload FROM events WHERE kind IN "
+                    "('skill.telemetry.push','skill.telemetry.expand')"
+                    ).fetchall()):
+                p = json.loads(r["payload"])
+                v = p.get("skill_id") or p.get("name")
+                if v:
+                    seen.add(v)
+            dark = weak = 0
+            for r in rows(con.execute(
+                    """SELECT s.name, s.skill_id, f.value t FROM skills s
+                    LEFT JOIN skill_fields f ON f.skill_id=s.skill_id
+                    AND f.field='trigger'
+                    WHERE s.layer!='archive' AND s.status!='retired'""")):
+                if r["name"] not in seen and r["skill_id"] not in seen:
+                    dark += 1
+                t = r["t"] or ""
+                if t.startswith('"'):
+                    t = json.loads(t)
+                has_cjk = bool(re.search(r"[\u4e00-\u9fff]", t))
+                if len(t) < 25 or (not has_cjk and len(t) < 60):
+                    weak += 1
+            total = con.execute(
+                "SELECT COUNT(*) FROM events").fetchone()[0]
+            out = [f"暗区数量: {dark}",
+                   f"经图字节数: {len(render_map().encode())}",
+                   f"弱trigger数: {weak}",
+                   f"事件总数: {total}"]
+            if since:
+                n = con.execute(
+                    "SELECT COUNT(*) FROM events WHERE ts > ?",
+                    (since,)).fetchone()[0]
+                out.append(f"since({since} UTC)新增事件: {n}")
+            return "\n".join(out)
         finally:
             con.close()
 

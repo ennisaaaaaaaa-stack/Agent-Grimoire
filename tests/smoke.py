@@ -18,8 +18,8 @@ def check(name, ok, detail=""):
 
 
 def get(path, headers=None):
-    req = urllib.request.Request(BASE + urllib.parse.quote(path, safe="/"),
-                                 headers=headers or {})
+    path = path if "?" in path else urllib.parse.quote(path, safe="/")
+    req = urllib.request.Request(BASE + path, headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return r.status, r.read().decode()
@@ -147,6 +147,13 @@ con.commit()
 con.close()
 s, b = get("/tag/repair")
 check("别名折叠(repair查到维修山)", s == 200 and "归还术" in b, b[:120])
+
+# 13. /stats 读面: 四数字 + since增量
+s, b = get("/stats")
+check("/stats四数字", s == 200 and "暗区数量" in b and "经图字节数" in b
+      and "弱trigger数" in b and "事件总数" in b, b.replace("\n", " | "))
+s, b = get("/stats?since=2026-08-21T16:31:00")
+check("/stats?since增量", s == 200 and "新增事件" in b, b.replace("\n", " | "))
 
 fails = [r for r in results if not r[1]]
 print(f"\n{len(results) - len(fails)}/{len(results)} 绿")
