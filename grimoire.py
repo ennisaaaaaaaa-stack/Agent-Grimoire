@@ -178,6 +178,83 @@ PATTERN_RULES = [
 ]
 
 
+def _slot_norm(s):
+    """槽位词规范化: 组合tag(类型·场景·关键词)的槽内清空格/统一宽窄."""
+    return s.strip().replace(" ", "").replace("．", ".").replace("　", "")
+
+
+def _levenshtein(a, b):
+    """编辑距离, tag查重提示用."""
+    if a == b:
+        return 0
+    if not a or not b:
+        return max(len(a), len(b))
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1,
+                           prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def tag_dup_check(con, incoming):
+    """写入侧tag查重 (只提示+精确折叠, 不拦写入 — 契约库门纪律):
+    1) 单tag精确命中正字/别名 → 自动折到正字, 提示;
+    2) 组合tag折槽不折串: 槽内折到正字+去重保序, 整串规范化;
+    3) 模糊近似(编辑距离≤2, len≥3) → 只提示不折, 提交者选旧tag或确认新立.
+    返回 (folded_tags, hints): folded实际入库, hints进submit响应."""
+    known = {}
+    for r in rows(con.execute(
+            "SELECT tag, aliases FROM tags").fetchall()):
+        known[r["tag"]] = (json.loads(r["aliases"])
+                           if r["aliases"] else [])
+    norm = lambda s: _slot_norm(s).lower()
+    canon = {}
+    for t, al in known.items():
+        canon[norm(t)] = t
+        for a in al:
+            canon[norm(a)] = t
+    folded, hints = [], []
+    for t in incoming:
+        nt = norm(t)
+        if "·" in t:
+            slots = [_slot_norm(x) for x in t.split("·") if x.strip()]
+            slots = [canon.get(norm(s), s) for s in slots]
+            seen, dedup = set(), []
+            for s in slots:
+                if s not in seen:
+                    seen.add(s)
+                    dedup.append(s)
+            folded_tag = "·".join(dedup)
+            if folded_tag != t:
+                hints.append(f"组合tag规范化: '{t}' → '{folded_tag}' "
+                             f"(槽位查重: 槽内折到正字/去重保序)")
+            folded.append(folded_tag)
+            continue
+        if nt in canon:
+            c = canon[nt]
+            if c != t:
+                hints.append(f"tag查重: '{t}' 已有正字 '{c}' — 已折叠写入 "
+                             f"(后续查询自动归并)")
+            folded.append(c)
+            continue
+        near = []
+        for c_tag in canon:
+            ok_len = (len(nt) >= 3 or bool(re.search(r"[\u4e00-\u9fff]", nt))) \
+                and (len(c_tag) >= 3 or bool(re.search(r"[\u4e00-\u9fff]", c_tag)))
+            if ok_len and abs(len(c_tag) - len(nt)) <= 2 \
+                    and _levenshtein(nt, c_tag) <= 2:
+                near.append(c_tag)
+        if near:
+            hints.append(f"tag近似提示: '{t}' 与既有正字 {'/'.join(near)} "
+                         f"编辑距离≤2 — 是否选旧tag? (只提示未折叠; "
+                         f"请改用旧tag或确认新立)")
+        folded.append(t)
+    return folded, hints
+
+
 def scan_skill(con, name, body, exclude_id=None):
     findings = []
     all_text = f"{name}\n{body}"
@@ -566,7 +643,9 @@ class Handler(BaseHTTPRequestHandler):
                      body.get("author") or "unknown",
                      body.get("source"), body.get("imported_at"),
                      skill_body, sha(skill_body), now(), now()))
-                for field, val in (("tags", tags_list),
+                # tag查重: 精确折叠+模糊提示 (写入侧, 只提示不拦)
+                folded_tags, tag_hints = tag_dup_check(con, tags_list)
+                for field, val in (("tags", folded_tags),
                                    ("trigger", body.get("trigger") or ""),
                                    ("boundary", body.get("boundary") or ""),
                                    ("why", body.get("why") or ""),
@@ -577,7 +656,7 @@ class Handler(BaseHTTPRequestHandler):
                         (sid, field, json.dumps(val, ensure_ascii=False)))
                 # 山系自动生长: 挂不进现有山的tag在submit时自动种成平铺山根
                 # (契约tag卫生规则1: 新skill优先挂现有tag; 门槛是门槛, 长山是长山)
-                for t in tags_list:
+                for t in folded_tags:
                     con.execute(
                         "INSERT OR IGNORE INTO tags(tag) VALUES(?)", (t,))
                 # 扫描坛建藏书阁门口: draft起步, 报告挂上, 写入畅通
@@ -610,6 +689,8 @@ class Handler(BaseHTTPRequestHandler):
                 resp = {"skill_id": sid, "status": "draft",
                         "layer": "index",
                         "scan": {"count": len(findings)}}
+                if tag_hints:
+                    resp["tag_hints"] = tag_hints
                 if findings:
                     resp["scan"]["findings"] = findings
                     resp["note"] = ("报告已挂, 写入畅通(只记不拦)。"

@@ -155,6 +155,20 @@ check("/stats四数字", s == 200 and "暗区数量" in b and "经图字节数" 
 s, b = get("/stats?since=2026-08-21T16:31:00")
 check("/stats?since增量", s == 200 and "新增事件" in b, b.replace("\n", " | "))
 
+# 14. tag查重: 别名精确折叠(repair→维修) + 组合tag槽内规范化 + hints进响应
+s, b = post("/skill", {
+    "name": "查重测试书",
+    "author": "hui",
+    "tags": ["repair", "流程 · 维修"],
+    "body": "# 查重\n组合tag槽内折正字, 别名自动折叠。"})
+d4 = json.loads(b) if s == 200 else {}
+hints = d4.get("tag_hints", [])
+check("tag查重h进响应", s == 200 and len(hints) >= 2,
+      " | ".join(hints)[:160])
+s, b = get("/skill/查重测试书")
+check("折叠后入库(repair→维修, 组合tag规整)",
+      "维修" in b and "流程·维修" in b and '"repair"' not in b, b[:200])
+
 fails = [r for r in results if not r[1]]
 print(f"\n{len(results) - len(fails)}/{len(results)} 绿")
 sys.exit(1 if fails else 0)
