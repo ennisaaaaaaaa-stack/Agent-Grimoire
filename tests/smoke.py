@@ -203,6 +203,16 @@ s, b = get("/skill/查重测试书")
 check("折叠后入库(repair→维修, 组合tag规整)",
       "维修" in b and "流程·维修" in b and '"repair"' not in b, b[:200])
 
+# 14.5 merge到全新tag: 改名场景 — 目标tag不存在时别名必须真迁移 (照照复验残留)
+#      旧姿势: tags无该行→UPDATE零行→旧tag又被DELETE→别名整行蒸发
+s, b = post("/event", {"kind": "skill.tag.merge", "operator": "巡山使",
+                       "old_tag": "维修", "new_tag": "修缮"})
+check("merge到新tag成功", s == 200 and "修缮" in b, b[:120])
+s, b = get("/tag/repair")
+check("merge后旧别名仍可查(迁到新tag)", s == 200 and "归还术" in b, b[:120])
+s, b = get("/tag/修缮")
+check("新tag自身可查(山头已种)", s == 200 and "归还术" in b, b[:120])
+
 fails = [r for r in results if not r[1]]
 print(f"\n{len(results) - len(fails)}/{len(results)} 绿")
 sys.exit(1 if fails else 0)

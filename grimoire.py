@@ -630,6 +630,9 @@ class Handler(BaseHTTPRequestHandler):
                 have = json.loads(new_row["aliases"])
                 merged_aliases = list(dict.fromkeys(
                     have + [a for a in merged_aliases if a not in have]))
+            # 先种山再迁别名: merge目标常是不存在的新tag(改名场景) —
+            # tags无该行则UPDATE零行生效, 别名整行蒸发 (照照复验残留缺陷)
+            con.execute("INSERT OR IGNORE INTO tags(tag) VALUES(?)", (new_tag,))
             con.execute(
                 "UPDATE tags SET aliases=? WHERE tag=?",
                 (json.dumps(merged_aliases, ensure_ascii=False)
