@@ -7,9 +7,11 @@ Patrol-003 已证机械判据分不开这两者(伪精度销案), 但名单本�
 用法: python3 weak_trigger_candidates.py   # 只读
 """
 import json
+import pathlib
 import sqlite3
 
-DB = "grimoire.db"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DB = str(ROOT / "grimoire.db")
 
 
 def main():
