@@ -7,6 +7,9 @@
 
 1. `curl -s http://127.0.0.1:8730/health` —— 不通则整轮跳过，报告"服务未起"，什么都不动。
 2. `curl -s http://127.0.0.1:8730/darkzone` —— 拿暗区点名名单。
+3. 机械半边直接跑工具（不要手工拼数字/名单——那是token白烧）:
+   - `python3 tools/patrol_report_head.py [上轮UTC]` —— 四数字+暗区分组点名+超限山头, 粘进报告头部
+   - `python3 tools/weak_trigger_candidates.py` —— 弱trigger候选名单(判断仍归你)
 
 ## 巡逻路线
 
@@ -19,7 +22,7 @@
 ### 2. 暗区夜游
 
 - /darkzone 名单 = 从未被 push/expand 过的书（archive 层已排除）
-- 2026-08-22 批量导入的迁移书（约 110 本）标记"新入馆待观察"——点名即可，不逐本判断
+- 迁移豁免批（source=hermes-import）由 patrol_report_head 自动分组——豁免点名归工具，你只看"非迁移暗区"那一段
 - 其余逐本判断："描述写坏了"还是"真的没用了"
 - 触发词短 / 无中文 / 导入碎片 = 描述写坏的信号 → rewrite（先 GET /skill/&lt;name&gt; 拿 baseline_hash）
 - 出口必须带全量点名名单，点名不豁免：名单是它们的保底，逐本判断是你的活
