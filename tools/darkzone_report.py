@@ -8,11 +8,13 @@
 用法: python3 darkzone_report.py   # 只读, 零写入
 """
 import json
+import pathlib
 import re
 import sqlite3
 import urllib.request
 
-DB = "grimoire.db"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DB = str(ROOT / "grimoire.db")
 BASE = "http://127.0.0.1:8730"
 
 

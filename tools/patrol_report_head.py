@@ -12,13 +12,15 @@
 只读零写入。
 """
 import json
+import pathlib
 import re
 import sqlite3
 import subprocess
 import sys
 from collections import Counter
 
-DB = "grimoire.db"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DB = str(ROOT / "grimoire.db")
 HERE = __file__.rsplit("/", 1)[0]
 
 
