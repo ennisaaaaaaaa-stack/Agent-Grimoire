@@ -11,7 +11,7 @@ import urllib.request
 from pathlib import Path
 
 BASE = "http://127.0.0.1:8730"
-SKILLS_DIR = Path("/home/ubuntu/.hermes/skills")
+SKILLS_DIR = Path(os.environ.get("HERMES_SKILLS_DIR", str(Path.home() / ".hermes" / "skills")))
 
 
 def post(path, obj):

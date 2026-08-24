@@ -6,7 +6,7 @@
 """
 import json, re, sqlite3, sys, urllib.request
 
-DB = "/home/ubuntu/Agent-Grimoire/grimoire.db"
+DB = os.environ.get("GRIMOIRE_DB", str(pathlib.Path(__file__).resolve().parent.parent / "grimoire.db"))
 MAP = "http://127.0.0.1:8730/map"
 
 def main():

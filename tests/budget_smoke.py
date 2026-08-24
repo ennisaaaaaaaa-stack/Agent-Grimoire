@@ -11,6 +11,7 @@
 import atexit
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -42,7 +43,7 @@ def post(path, obj):
 _tmpdir = tempfile.TemporaryDirectory(prefix="grimoire-budget-")
 _srv = subprocess.Popen(
     [sys.executable, "grimoire.py", str(_PORT)],
-    cwd="/home/ubuntu/Agent-Grimoire",
+    cwd=str(pathlib.Path(__file__).resolve().parent.parent),
     env={**os.environ, "GRIMOIRE_DB": _tmpdir.name + "/budget.db",
          "GRIMOIRE_BUDGET_WINDOW": "3600", "GRIMOIRE_BUDGET_MAX": "1"},
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
