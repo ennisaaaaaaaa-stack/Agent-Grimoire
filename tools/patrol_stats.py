@@ -4,7 +4,7 @@
 输出: 暗区数量 / 经图字节数 / 弱trigger数 / (可选)上轮以来新增事件数
 弱trigger判据与历次报告一致: <25字 或 无中文且<60字。
 """
-import json, re, sqlite3, sys, urllib.request
+import json, os, pathlib, re, sqlite3, sys, urllib.request
 
 DB = os.environ.get("GRIMOIRE_DB", str(pathlib.Path(__file__).resolve().parent.parent / "grimoire.db"))
 MAP = "http://127.0.0.1:8730/map"
