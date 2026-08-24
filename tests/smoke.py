@@ -47,7 +47,9 @@ _tmpdir = tempfile.TemporaryDirectory(prefix="grimoire-smoke-")
 _srv = subprocess.Popen(
     [sys.executable, "grimoire.py", str(_SMOKE_PORT)],
     cwd="/home/ubuntu/Agent-Grimoire",
-    env={**os.environ, "GRIMOIRE_DB": _tmpdir.name + "/smoke.db"},
+    env={**os.environ, "GRIMOIRE_DB": _tmpdir.name + "/smoke.db",
+         # 烟测预算: 小窗口大上限不干扰既有断言, 预算专项用独立迷你实例测
+         "GRIMOIRE_BUDGET_WINDOW": "3600", "GRIMOIRE_BUDGET_MAX": "50"},
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 # 隔离含拆除: 烟测退出(含中途崩)必杀server, 否则孤儿占口, 下一轮打到陈旧DB=状态依赖绿
 import atexit

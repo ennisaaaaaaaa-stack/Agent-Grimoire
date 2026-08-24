@@ -26,6 +26,14 @@ DB = os.environ.get("GRIMOIRE_DB", "/home/ubuntu/Agent-Grimoire/grimoire.db")
 SCHEMA = "/home/ubuntu/Agent-Grimoire/schema.sql"
 LISTEN_HOST = "127.0.0.1"
 
+# ── one-mutation budget (契约v0.2 §策展人: 单次巡视至多一个落盘动作) ──
+# 服务端强制: 同一 operator 在滚动窗口内 governance 事件达到上限后, 第二笔起 429。
+# 窗口/上限可用 GRIMOIRE_BUDGET_WINDOW(秒)/GRIMOIRE_BUDGET_MAX 覆盖 (烟测用小窗)。
+# 豁免: 库主 hui 不受限 (手动批处理是库主特权); 遥测事件不占预算。
+BUDGET_WINDOW = int(os.environ.get("GRIMOIRE_BUDGET_WINDOW", 24 * 3600))
+BUDGET_MAX = int(os.environ.get("GRIMOIRE_BUDGET_MAX", 2))
+BUDGET_EXEMPT = {"hui"}
+
 # 契约 v0.2 域6全量事件（skill.checkin.scan 由提交路径内部落账，不经 POST /event）
 TELEMETRY_KINDS = {          # 只记不动：遥测永远不触发变更
     "skill.telemetry.push",
@@ -53,6 +61,50 @@ def db():
 
 def now():
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+
+
+def _ts_epoch(ts: str) -> float:
+    """ISO文本 → epoch秒 (解析失败返回0, 预算宁可漏拦不可误拦)。"""
+    try:
+        return time.mktime(time.strptime(ts, "%Y-%m-%dT%H:%M:%S")) - time.timezone
+    except Exception:
+        return 0.0
+
+
+def budget_check(con, operator: str):
+    """one-mutation budget: 窗口内 governance 事件已达上限则返回拒绝信息。
+
+    返回 None = 放行; 返回 dict = 拒绝(HTTP 429)。
+    豁免: BUDGET_EXEMPT 内的 operator (库主手动批处理)。
+    """
+    if operator in BUDGET_EXEMPT:
+        return None
+    cutoff = time.strftime("%Y-%m-%dT%H:%M:%S",
+                           time.gmtime(time.time() - BUDGET_WINDOW))
+    n = con.execute(
+        "SELECT COUNT(*) FROM events WHERE operator=? AND kind NOT IN "
+        "(?, ?) AND ts >= ?",
+        (operator, "skill.telemetry.push", "skill.telemetry.expand",
+         cutoff)).fetchone()[0]
+    if n < BUDGET_MAX:
+        return None
+    oldest = con.execute(
+        "SELECT MIN(ts) FROM events WHERE operator=? AND kind NOT IN "
+        "(?, ?) AND ts >= ?",
+        (operator, "skill.telemetry.push", "skill.telemetry.expand",
+         cutoff)).fetchone()[0]
+    reset_at = (_ts_epoch(oldest) + BUDGET_WINDOW
+                if oldest else time.time() + BUDGET_WINDOW)
+    return {
+        "error": f"one-mutation budget: 窗口{BUDGET_WINDOW}s内已有{n}笔落盘动作, "
+                 f"上限{BUDGET_MAX}",
+        "governance_events_in_window": n,
+        "budget_max": BUDGET_MAX,
+        "window_seconds": BUDGET_WINDOW,
+        "window_resets_at": time.strftime("%Y-%m-%dT%H:%M:%S",
+                                          time.gmtime(reset_at)),
+        "hint": "契约v0.2: 单次巡视至多一个落盘动作。想动第二笔写进策展日志下周再动。",
+    }
 
 
 def sha(text):
@@ -507,6 +559,13 @@ class Handler(BaseHTTPRequestHandler):
 
                 resp = self.govern(con, kind, operator, body)
                 if resp[0] < 300:  # 动作成功才落账
+                    # one-mutation budget: govern 动作成功后、落账前检查。
+                    # 顺序说明: 先看动作合法性(404/409短路), 再看预算——
+                    # 这样 429 响应里的"已有N笔"都是真实落账数。
+                    denied = budget_check(con, operator)
+                    if denied:
+                        con.rollback()
+                        return self.send_json(429, denied)
                     con.execute(
                         "INSERT INTO events(ts, operator, kind, payload) "
                         "VALUES(?,?,?,?)",
