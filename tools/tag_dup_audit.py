@@ -9,13 +9,15 @@
 用法: python3 tools/tag_dup_audit.py [--db PATH]
 """
 import json
+import os
+import pathlib
 import sqlite3
 import sys
 
-sys.path.insert(0, "/home/ubuntu/Agent-Grimoire")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 from grimoire import _slot_norm, _levenshtein  # noqa: E402
 
-DB = "/home/ubuntu/Agent-Grimoire/grimoire.db"
+DB = os.environ.get("GRIMOIRE_DB", str(pathlib.Path(__file__).resolve().parent.parent / "grimoire.db"))
 
 
 def norm(s):

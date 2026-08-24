@@ -26,6 +26,11 @@ HERE = __file__.rsplit("/", 1)[0]
 
 def main():
     since = sys.argv[1] if len(sys.argv) > 1 else None
+    # produced-by 印章 (v0.3, 照照建议): 报告头自报产出工具。
+    # 协议退化(退回手工拼名单)变成可机检——报告头没有工具段 = drift 信号。
+    print("produced-by: patrol_report_head.py"
+          + (f" (since={since})" if since else ""))
+    print()
     con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
 

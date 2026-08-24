@@ -22,8 +22,9 @@ import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-DB = os.environ.get("GRIMOIRE_DB", "/home/ubuntu/Agent-Grimoire/grimoire.db")
-SCHEMA = "/home/ubuntu/Agent-Grimoire/schema.sql"
+DB = os.environ.get("GRIMOIRE_DB", os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "grimoire.db"))
+SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
 LISTEN_HOST = "127.0.0.1"
 
 # ── one-mutation budget (契约v0.2 §策展人: 单次巡视至多一个落盘动作) ──
@@ -81,18 +82,17 @@ def budget_check(con, operator: str):
         return None
     cutoff = time.strftime("%Y-%m-%dT%H:%M:%S",
                            time.gmtime(time.time() - BUDGET_WINDOW))
+    gov_ph = ",".join("?" for _ in GOVERNANCE_KINDS)
     n = con.execute(
-        "SELECT COUNT(*) FROM events WHERE operator=? AND kind NOT IN "
-        "(?, ?) AND ts >= ?",
-        (operator, "skill.telemetry.push", "skill.telemetry.expand",
-         cutoff)).fetchone()[0]
+        f"SELECT COUNT(*) FROM events WHERE operator=? AND kind IN "
+        f"({gov_ph}) AND ts >= ?",
+        (operator, *GOVERNANCE_KINDS, cutoff)).fetchone()[0]
     if n < BUDGET_MAX:
         return None
     oldest = con.execute(
-        "SELECT MIN(ts) FROM events WHERE operator=? AND kind NOT IN "
-        "(?, ?) AND ts >= ?",
-        (operator, "skill.telemetry.push", "skill.telemetry.expand",
-         cutoff)).fetchone()[0]
+        f"SELECT MIN(ts) FROM events WHERE operator=? AND kind IN "
+        f"({gov_ph}) AND ts >= ?",
+        (operator, *GOVERNANCE_KINDS, cutoff)).fetchone()[0]
     reset_at = (_ts_epoch(oldest) + BUDGET_WINDOW
                 if oldest else time.time() + BUDGET_WINDOW)
     return {
@@ -360,6 +360,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_text(200, render_map())
         if self.path == "/darkzone":
             return self.get_darkzone()
+        if self.path.split("?")[0] == "/tools":
+            return self.get_tools_map()
         if self.path.split("?")[0] == "/stats":
             since = urllib.parse.parse_qs(
                 urllib.parse.urlparse(self.path).query).get("since", [None])[0]
@@ -533,7 +535,119 @@ class Handler(BaseHTTPRequestHandler):
             return self.post_event()
         if self.path == "/skill":
             return self.post_skill()
-        return self.send_text(404, "endpoints: POST /event, POST /skill")
+        if self.path == "/tool":
+            return self.post_tool()
+        return self.send_text(404, "endpoints: POST /event, POST /skill, POST /tool")
+
+    def post_tool(self):
+        """工具层分区 (v0.3) 写口。两种动作:
+        1. tool.register (登记制, CLI/API 走这个): 自报能力+门牌, 巡山核验。
+           与 skill.submit 同律: 提交即 draft, 巡山使裁决转正。
+        2. tool.telemetry (entry 级只记不动): plugin hook 落笔, 零 AI 参与。
+        MCP 不走登记——config.yaml 是事实源, sync 是被动镜像 (tools/sync_mcp.py)。
+        """
+        try:
+            body = self.read_json()
+        except ValueError as e:
+            return self.send_text(400, f"bad json: {e}")
+        action = body.get("action")
+        if action == "tool.telemetry":
+            entry_id = body.get("entry_id")
+            if not entry_id:
+                return self.send_text(400, "缺 entry_id")
+            con = db()
+            try:
+                with _lock:
+                    row = con.execute(
+                        "SELECT entry_id FROM tool_entries WHERE entry_id=?",
+                        (entry_id,)).fetchone()
+                    if not row:
+                        return self.send_text(404, f"entry不存在: {entry_id}")
+                    con.execute(
+                        "INSERT INTO tool_telemetry(ts, entry_id, caller, ok, payload) "
+                        "VALUES(?,?,?,?,?)",
+                        (now(), entry_id, body.get("caller") or "unknown",
+                         1 if body.get("ok", True) else 0,
+                         json.dumps({k: v for k, v in body.items()
+                                     if k not in ("action", "entry_id")},
+                                    ensure_ascii=False)))
+                    con.commit()
+                return self.send_text(200, "已落账。只记不动。")
+            finally:
+                con.close()
+        if action == "tool.register":
+            cap = body.get("capability")
+            kind = body.get("kind")
+            ref = body.get("ref")
+            if not cap or kind not in ("mcp", "cli", "api") or not ref:
+                return self.send_text(400, "缺 capability / kind∈{mcp,cli,api} / ref")
+            con = db()
+            try:
+                with _lock:
+                    con.execute(
+                        "INSERT OR IGNORE INTO tools(capability, note, created_at, updated_at) "
+                        "VALUES(?,?,?,?)",
+                        (cap, body.get("note") or "", now(), now()))
+                    if con.execute(
+                            "SELECT COUNT(*) FROM tool_entries "
+                            "WHERE capability=? AND kind=? AND ref=?",
+                            (cap, kind, ref)).fetchone()[0]:
+                        return self.send_text(409, f"entry已存在: {cap}/{kind}/{ref}")
+                    eid = "te:" + str(uuid.uuid4())
+                    con.execute(
+                        "INSERT INTO tool_entries(entry_id, capability, kind, ref, status, "
+                        "note, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                        (eid, cap, kind, ref, "active",
+                         body.get("entry_note") or "", now(), now()))
+                    con.commit()
+                return self.send_json(200, {
+                    "capability": cap, "kind": kind, "ref": ref,
+                    "entry_id": eid, "status": "active"})
+            finally:
+                con.close()
+        return self.send_text(400, "action须为 tool.register | tool.telemetry")
+
+    def get_tools_map(self):
+        """工具层读面: capability 视图 (entry 级遥测聚合) + 暗区 (零调用 entry)。
+        照照判据落地: disable 决策在 entry 级——死 server 不被忙的 CLI 孪生救活。
+        """
+        con = db()
+        try:
+            out = ["工具经图 (capability 视图, 遥测 entry 级聚合):", ""]
+            caps = rows(con.execute(
+                "SELECT t.capability, t.note FROM tools t "
+                "ORDER BY t.capability").fetchall())
+            if not caps:
+                return self.send_text(200, "工具经图: (空——还没有登记的工具)")
+            dark = []
+            for c in caps:
+                entries = rows(con.execute(
+                    "SELECT e.entry_id, e.kind, e.ref, e.status FROM tool_entries e "
+                    "WHERE e.capability=? ORDER BY e.kind, e.ref",
+                    (c["capability"],)).fetchall())
+                lines = []
+                for e in entries:
+                    tel = con.execute(
+                        "SELECT COUNT(*), MAX(ts), SUM(ok) FROM tool_telemetry "
+                        "WHERE entry_id=?", (e["entry_id"],)).fetchone()
+                    n, last, ok_n = tel[0], tel[1], (tel[2] or 0)
+                    stat = (f"{e['kind']:>3} {e['ref']} [{e['status']}]"
+                            f"  calls={n} ok={ok_n} last={last or '从未'}")
+                    lines.append("  " + stat)
+                    if n == 0:
+                        dark.append(f"{c['capability']} :: {e['kind']} {e['ref']}")
+                cross = {e["kind"] for e in entries}
+                out.append(f"◆ {c['capability']}  ({'/'.join(sorted(cross))})"
+                           + (f"  — {c['note']}" if c["note"] else ""))
+                out.extend(lines)
+                out.append("")
+            out.append("工具暗区 (零调用 entry):")
+            out.extend("  " + d for d in dark if d)
+            if len(dark) == 0:
+                out.append("  (空)")
+            return self.send_text(200, "\n".join(out))
+        finally:
+            con.close()
 
     def post_event(self):
         try:
@@ -832,6 +946,10 @@ class Handler(BaseHTTPRequestHandler):
 def init_db():
     con = sqlite3.connect(DB)
     con.executescript(open(SCHEMA).read())
+    # 工具层分区 (v0.3): tools/tool_entries/tool_telemetry。幂等, 与主 schema 同律。
+    _tools_schema = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "schema_tools.sql")
+    con.executescript(open(_tools_schema).read())
     con.commit()
     con.close()
     print("initialized:", DB)

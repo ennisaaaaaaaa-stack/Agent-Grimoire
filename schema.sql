@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS scan_reports (
   ts        TEXT NOT NULL
 );
 
+-- 工具层分区 (v0.3): 见 schema_tools.sql。init_db 幂等并跑两份 schema。
 CREATE INDEX IF NOT EXISTS idx_events_operator ON events(operator, kind);
 CREATE INDEX IF NOT EXISTS idx_fields_field ON skill_fields(field);
 CREATE INDEX IF NOT EXISTS idx_scan_skill ON scan_reports(skill_id);
