@@ -4,6 +4,7 @@
 导入后批量转正(在产技能, 日常会话已在使用=验证过), 全走正脸接口, 账本留痕。
 """
 import json
+import os
 import re
 import sys
 import time
@@ -47,14 +48,19 @@ def parse_frontmatter(text):
 
 def main():
     files = sorted(SKILLS_DIR.glob("*/*/SKILL.md")) + \
-        sorted(SKILLS_DIR.glob("*/SKILL.md"))
+        sorted(SKILLS_DIR.glob("*/SKILL.md")) + \
+        sorted(SKILLS_DIR.glob("*/*/*/SKILL.md"))  # 三层嵌套(mlops/evaluation/...与.archive/...——pathlib的*会匹配点目录，实测不跳过)
     print(f"found {len(files)} SKILL.md")
-    ok = fail = 0
+    ok = fail = skipped = 0
     flagged = []
     t0 = time.time()
     for f in files:
         rel = f.relative_to(SKILLS_DIR)
         category = rel.parts[0]              # 山系 = 类目
+        # 三层嵌套(mlops/evaluation/x): 山系=mlops, 子类目并进tags
+        tags = [category]
+        if len(rel.parts) == 4:
+            tags.append(f"{rel.parts[0]}/{rel.parts[1]}")
         meta, body = parse_frontmatter(f.read_text(encoding="utf-8", errors="replace"))
         name = meta.get("name") or rel.parts[-2]
         desc = meta.get("description") or ""
@@ -63,7 +69,7 @@ def main():
             "name": name,
             "author": author,
             "source": "hermes-import",
-            "tags": [category],
+            "tags": tags,
             "trigger": desc[:200],
             "body": body,
             "operator": "hui",
@@ -74,10 +80,12 @@ def main():
             if n:
                 sev = [x.get("severity") for x in resp.get("scan", {}).get("findings", [])]
                 flagged.append((name, category, sev))
+        elif s == 409:
+            skipped += 1  # 已在馆: 幂等重放的正常态, 不是失败
         else:
             fail += 1
             print(f"FAIL {name}: {s} {str(resp)[:120]}")
-    print(f"import: {ok} ok, {fail} fail, {time.time()-t0:.1f}s")
+    print(f"import: {ok} ok, {skipped} in-library, {fail} fail, {time.time()-t0:.1f}s")
 
     # 批量转正: 在产技能, 本环境日常会话使用中=已验证。账本逐条留痕。
     t0 = time.time()

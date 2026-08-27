@@ -25,6 +25,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 DB = os.environ.get("GRIMOIRE_DB", os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "grimoire.db"))
 SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
+VAULT_DIR = os.environ.get(
+    "GRIMOIRE_VAULT",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "vault"))
 LISTEN_HOST = "127.0.0.1"
 
 # ── one-mutation budget (契约v0.2 §策展人: 单次巡视至多一个落盘动作) ──
@@ -360,12 +363,19 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_text(200, render_map())
         if self.path == "/darkzone":
             return self.get_darkzone()
+        if self.path.split("?")[0] == "/vault":
+            return self.get_vault_listing()
         if self.path.split("?")[0] == "/tools":
             return self.get_tools_map()
         if self.path.split("?")[0] == "/stats":
             since = urllib.parse.parse_qs(
                 urllib.parse.urlparse(self.path).query).get("since", [None])[0]
             return self.send_text(200, self.get_stats(since))
+        m = re.match(r"^/vault/([^/]+)/(.+)$", self.path.split("?")[0])
+        if m:
+            return self.get_vault_file(
+                urllib.parse.unquote(m.group(1)),
+                urllib.parse.unquote(m.group(2)))
         m = re.match(r"^/tag/([^/]+)$", self.path)
         if m:
             return self.get_tag(urllib.parse.unquote(m.group(1)))
@@ -486,6 +496,73 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_text(404, f"tag '{tag}' 下暂无在馆条目")
             return self.send_text(
                 200, f"山下条目（首行描述）:\n" + "\n".join(out))
+        finally:
+            con.close()
+
+    def get_vault_listing(self):
+        """GET /vault?skill=<name> — 附件索引清单。无参数=全馆附件统计。"""
+        con = db()
+        try:
+            q = urllib.parse.parse_qs(
+                urllib.parse.urlparse(self.path).query)
+            skill = (q.get("skill") or [None])[0]
+            if skill:
+                row = con.execute(
+                    "SELECT skill_id FROM skills WHERE name=?",
+                    (skill,)).fetchone()
+                if not row:
+                    return self.send_text(404, f"skill不存在: {skill}")
+                fl = rows(con.execute(
+                    "SELECT relpath, size, sha256, binary, synced_at "
+                    "FROM vault_index WHERE skill_id=? ORDER BY relpath",
+                    (row["skill_id"],)).fetchall())
+                lines = [f"# vault: {skill} ({len(fl)} files)"]
+                for f in fl:
+                    flag = " [binary]" if f["binary"] else ""
+                    lines.append(
+                        f"  {f['relpath']}  ({f['size']}B, "
+                        f"{f['sha256'][:12]}{flag})")
+                lines.append("\nGET /vault/<skill>/<relpath> 取文件; "
+                             "binary以base64返回")
+                return self.send_text(200, "\n".join(lines))
+            # 全馆统计
+            st = con.execute(
+                "SELECT count(*) n, sum(size) sz FROM vault_index").fetchone()
+            top = rows(con.execute(
+                "SELECT s.name, count(*) n, sum(v.size) sz "
+                "FROM vault_index v JOIN skills s ON s.skill_id=v.skill_id "
+                "GROUP BY v.skill_id ORDER BY sz DESC LIMIT 10").fetchall())
+            lines = [f"# vault 全馆: {st['n']} files, "
+                     f"{(st['sz'] or 0)/1024/1024:.1f} MB", "", "## 最重的10位:"]
+            for t in top:
+                lines.append(f"  {t['name']}: {t['n']} files, "
+                             f"{t['sz']/1024:.0f} KB")
+            return self.send_text(200, "\n".join(lines))
+        finally:
+            con.close()
+
+    def get_vault_file(self, skill, relpath):
+        """GET /vault/<skill>/<relpath> — 取附件内容。binary以base64返回。"""
+        con = db()
+        try:
+            row = con.execute(
+                "SELECT skill_id FROM skills WHERE name=?", (skill,)).fetchone()
+            if not row:
+                return self.send_text(404, f"skill不存在: {skill}")
+            vi = con.execute(
+                "SELECT * FROM vault_index WHERE skill_id=? AND relpath=?",
+                (row["skill_id"], relpath)).fetchone()
+            if not vi:
+                return self.send_text(404, f"附件不在馆: {relpath}")
+            # 路径安全: relpath已在索引内(入库时过审), 直接拼
+            fpath = os.path.join(VAULT_DIR, row["skill_id"], relpath)
+            if not os.path.isfile(fpath):
+                return self.send_text(410, f"索引在但文件丢失: {fpath}")
+            data = open(fpath, "rb").read()
+            if vi["binary"]:
+                import base64
+                return self.send_text(200, base64.b64encode(data).decode())
+            return self.send_text(200, data.decode("utf-8", errors="replace"))
         finally:
             con.close()
 
@@ -950,6 +1027,10 @@ def init_db():
     _tools_schema = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                  "schema_tools.sql")
     con.executescript(open(_tools_schema).read())
+    # 附件库 (v0.4): vault_index。附件落盘vault/，库只存索引。
+    _vault_schema = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "schema_vault.sql")
+    con.executescript(open(_vault_schema).read())
     con.commit()
     con.close()
     print("initialized:", DB)
