@@ -11,6 +11,12 @@
    - `python3 tools/patrol_report_head.py [上轮UTC]` —— 四数字+暗区分组点名+超限山头, 粘进报告头部
    - `python3 tools/weak_trigger_candidates.py` —— 弱trigger候选名单(判断仍归你)
 
+## 开工同步（契约 v0.2 欠账落账：巡山使顺路跑）
+
+0. `python3 tools/import_hermes_skills.py` —— Hermes技能库→山海单向同步。
+   幂等：已在馆的报 in-library 跳过，只有新增会入库。新增后看 scan flagged 有无 red。
+   409=正常态。跑完把「found N / 入库 M」写进报告头部。
+
 ## 巡逻路线
 
 ### 1. 树表卫生
