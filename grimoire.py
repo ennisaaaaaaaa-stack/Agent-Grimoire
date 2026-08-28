@@ -865,14 +865,12 @@ class Handler(BaseHTTPRequestHandler):
             if row["status"] != "draft":
                 return 409, {"error": "withdraw只清draft(探针/误提交); "
                                       "verified馆藏走review:discarded→retired"}
+            # 子表先清, 父表后清 — FK ON下父先删会constraint failed
+            # (ad-hoc验证抓的: smoke没测DELETE, 套件绿≠端点对)
+            for child in ("skill_fields", "scan_reports", "vault_index"):
+                con.execute(f"DELETE FROM {child} WHERE skill_id=?",
+                            (row["skill_id"],))
             con.execute("DELETE FROM skills WHERE skill_id=?",
-                        (row["skill_id"],))
-            con.execute("DELETE FROM skill_fields WHERE skill_id=?",
-                        (row["skill_id"],))
-            con.execute("DELETE FROM scan_reports WHERE skill_id=?",
-                        (row["skill_id"],))
-            # vault附件跟着清(镜像语义: 书撤回, 附件不留守)
-            con.execute("DELETE FROM vault_index WHERE skill_id=?",
                         (row["skill_id"],))
             return 200, {"withdrawn": row["skill_id"], "note": "draft已物理撤回"}
 
