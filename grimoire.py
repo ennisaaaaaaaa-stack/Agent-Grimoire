@@ -635,7 +635,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_text(
                     403, f"该skill是draft(未过审): {skill_id} — "
                          "默认读面不放行。带X-Review-Draft头进入审阅模式"
-                         "(red报告挂横幅)。经图'待审区'段可见书名。")
+                         "(red报告挂横幅)。经图'待审区'段只报数量。")
             banner = ""
             if row["status"] == "draft" and reds:
                 banner = (f"> ⚠️ 入关报告带{reds}条red — 审阅时过目, "
