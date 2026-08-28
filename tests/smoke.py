@@ -225,6 +225,19 @@ check("审阅头可读draft+折叠结果(repair→维修, 组合tag规整)",
       s == 200 and "维修" in b and "流程·维修" in b and '"repair"' not in b,
       b[:200])
 
+# 14.6 withdraw(Y5): draft物理撤回走DELETE — FK约束下子表先清(ad-hoc验证抓的回归口)
+_req = urllib.request.Request(
+    BASE + "/skill/" + urllib.parse.quote("查重测试书"), method="DELETE",
+    headers={"X-Operator": "smoke"})
+try:
+    with urllib.request.urlopen(_req, timeout=10) as _r:
+        _ws, _wb = _r.status, _r.read().decode()
+except urllib.error.HTTPError as _e:
+    _ws, _wb = _e.code, _e.read().decode()
+check("withdraw删draft=200", _ws == 200 and "已物理撤回" in _wb, _wb[:80])
+s, b = get("/skill/查重测试书", headers={"X-Review-Draft": "1"})
+check("withdraw后404", s == 404)
+
 # 14.5 merge到全新tag: 改名场景 — 目标tag不存在时别名必须真迁移 (照照复验残留)
 #      旧姿势: tags无该行→UPDATE零行→旧tag又被DELETE→别名整行蒸发
 s, b = post("/event", {"kind": "skill.tag.merge", "operator": "巡山使",
