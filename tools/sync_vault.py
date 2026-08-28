@@ -85,6 +85,11 @@ def main():
             if os.path.splitext(fname)[1].lower() in SKIP_EXT:
                 continue
             fpath = os.path.join(root, fname)
+            # R1(外聘审计): 拒绝文件symlink — walk的followlinks=False只挡目录
+            # 链接挡不住文件链接; 跟随即可能把~/.ssh/id_rsa等借道发布进vault
+            if os.path.islink(fpath):
+                report.append(f"SKIP(symlink拒绝入馆): {fname} @ {root}")
+                continue
             rel = os.path.relpath(fpath, skill_dir)
             scanned += 1
             size = os.path.getsize(fpath)

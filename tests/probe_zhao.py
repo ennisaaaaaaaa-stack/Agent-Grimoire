@@ -15,10 +15,12 @@ BASE = "http://127.0.0.1:18731"
 PORT = "18731"
 
 
-def get(path):
+def get(path, review=False):
     path = urllib.parse.quote(path, safe="/?=&")
+    req = urllib.request.Request(
+        BASE + path, headers={"X-Review-Draft": "1"} if review else {})
     try:
-        with urllib.request.urlopen(BASE + path, timeout=10) as r:
+        with urllib.request.urlopen(req, timeout=10) as r:
             return r.status, r.read().decode()
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()
@@ -67,14 +69,18 @@ NAME = "归还术-扫描修复流程"
 s, b = post("/skill", {"name": NAME, "author": "probe", "tags": ["维修"],
                        "trigger": "刚修完bug想存修法", "body": "# 归还术\nx"})
 check("fixture: 书入库", s == 200)
+# R3后消费者读面只亮verified — fixture顺手转正(治理面自种, 语义不变)
+s, b = post("/event", {"kind": "skill.pool.review", "operator": "probe",
+                       "skill_id": NAME, "decision": "promoted"})
+check("fixture: 转正", s == 200, b[:60])
 s, b = post("/event", {"kind": "skill.tag.alias.add", "operator": "probe",
                        "tag": "维修", "aliases": ["repair"]})
 check("fixture: 别名登记", s == 200)
 
 # ============ 以下为照照原版探针 v1, 探测逻辑未动 ============
 
-# 1) rewrite双花+重放
-s, b = get("/skill/" + NAME)
+# 1) rewrite双花+重放 (R3后draft默认403, 探针改走审阅头取基线)
+s, b = get("/skill/" + NAME, review=True)
 bh = b.split("baseline_hash: ")[1].splitlines()[0].strip()
 s1, r1 = post("/event", {"kind": "skill.description.rewrite", "operator": "A",
                           "skill_id": NAME, "trigger": "A的改写v1", "baseline_hash": bh})
@@ -85,7 +91,7 @@ check("B拿A改前hash被409挡(双花防护)", s2 == 409, r2[:80])
 s3, r3 = post("/event", {"kind": "skill.description.rewrite", "operator": "A",
                           "skill_id": NAME, "trigger": "A重放同一请求", "baseline_hash": bh})
 check("A重放旧hash也被409挡(重放防护)", s3 == 409, r3[:80])
-s, b = get("/skill/" + NAME)
+s, b = get("/skill/" + NAME, review=True)
 bh2 = b.split("baseline_hash: ")[1].splitlines()[0].strip()
 check("改写后baseline_hash已轮换(本轮已修)", bh2 != bh)
 
@@ -97,7 +103,8 @@ d = json.loads(b)
 sid = d.get("skill_id", "")
 check("带script tag的skill照收(只记不拦)", s == 200, sid)
 s, b = get("/map")
-check("经图纯文本无转义(script原文进经图) — 观察项③", "<script>" in b)
+check("经图纯文本且draft山不点亮(R3后script进不了经图) — 观察项③翻转",
+      "<script>" not in b)
 s, b = get("/tag/<script>alert(1)</script>")
 check("URL含<>仍404或200, 服务不炸", s in (200, 404), f"status={s}")
 

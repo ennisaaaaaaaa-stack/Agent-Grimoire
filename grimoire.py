@@ -50,6 +50,7 @@ GOVERNANCE_KINDS = {         # 写脸：策展动作，动作+落账一起（契
     "skill.tag.alias.add",   # 登记别名 (查询侧折叠用)
     "skill.prereq.update",   # 边增删
     "skill.description.rewrite",  # 改写绑 baseline_hash，不符→409 stale
+    "skill.pool.withdraw",   # draft物理撤回(探针/误提交清理); verified走review
 }
 EVENT_KINDS = TELEMETRY_KINDS | GOVERNANCE_KINDS
 
@@ -130,6 +131,27 @@ def render_map():
     try:
         tags = con.execute(
             "SELECT tag, parent, note FROM tags ORDER BY tag").fetchall()
+        # R3(外聘审计): 默认经图只亮verified书点亮的山 — draft-only山不进开场注入
+        # (山照常长: tags表submit时照种; 没进馆的书不点亮山头。巡山使走/darkzone看全量)
+        mapping = con.execute(
+            "SELECT s.name, s.layer, f.value AS tags "
+            "FROM skills s LEFT JOIN skill_fields f "
+            "ON f.skill_id = s.skill_id AND f.field = 'tags' "
+            "WHERE s.status = 'verified' AND s.layer != 'archive' "
+            "ORDER BY s.name").fetchall()
+        by_tag = {}
+        for m in rows(mapping):
+            for t in (json.loads(m["tags"]) if m["tags"] else []):
+                by_tag.setdefault(t, []).append(m["name"])
+        lit = set(by_tag)
+        grown = True
+        while grown:  # 被点亮山的父山跟着亮(链式上溯)
+            grown = False
+            for t in rows(tags):
+                if t["tag"] in lit and t["parent"] and t["parent"] not in lit:
+                    lit.add(t["parent"])
+                    grown = True
+        tags = [t for t in rows(tags) if t["tag"] in lit]
         children = {}
         roots = []
         for t in rows(tags):
@@ -199,7 +221,7 @@ def render_map():
             "SELECT s.name, s.layer, f.value AS tags "
             "FROM skills s LEFT JOIN skill_fields f "
             "ON f.skill_id = s.skill_id AND f.field = 'tags' "
-            "WHERE s.layer != 'archive' AND s.status != 'retired' "
+            "WHERE s.status = 'verified' AND s.layer != 'archive' "
             "ORDER BY s.name").fetchall()
         if mapping:
             by_tag = {}
@@ -209,6 +231,17 @@ def render_map():
             lines.append("## tag↔skill 映射")
             for t in sorted(by_tag):
                 lines.append(f"{t}: {', '.join(by_tag[t])}")
+            lines.append("")
+        # R3: draft不在默认经图露脸 — 想看draft(含red横幅)走X-Review-Draft头
+        drafts = con.execute(
+            "SELECT name FROM skills WHERE status='draft' "
+            "ORDER BY name").fetchall()
+        if drafts:
+            # R3补丁: 只报数量不列名字 — 经图是每session注入面,
+            # 列名字=攻击者可用skill名往所有agent上下文里塞任意串
+            lines.append(
+                f"## 待审区({len(drafts)}本draft, 不进默认经图; "
+                "名单走/darkzone, 审阅带X-Review-Draft头GET /skill/<name>)")
             lines.append("")
         return "\n".join(lines)
     finally:
@@ -480,7 +513,7 @@ class Handler(BaseHTTPRequestHandler):
                     "SELECT s.skill_id, s.name, s.layer, s.status, f.value AS tags "
                     "FROM skills s LEFT JOIN skill_fields f "
                     "ON f.skill_id = s.skill_id AND f.field = 'tags' "
-                    "WHERE s.layer != 'archive' AND s.status != 'retired' "
+                    "WHERE s.status = 'verified' AND s.layer != 'archive' "
                     "ORDER BY s.name").fetchall()):
                 taglist = json.loads(r["tags"]) if r["tags"] else []
                 if tag in taglist or tag in [t.lower() for t in taglist]:
@@ -549,6 +582,14 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT skill_id FROM skills WHERE name=?", (skill,)).fetchone()
             if not row:
                 return self.send_text(404, f"skill不存在: {skill}")
+            # R3: draft附件默认不外发 — 审阅者带X-Review-Draft取
+            if not self.headers.get("X-Review-Draft") and \
+                    con.execute(
+                        "SELECT status FROM skills WHERE skill_id=?",
+                        (row["skill_id"],)).fetchone()[0] != "verified":
+                return self.send_text(
+                    403, f"draft skill附件不外发: {skill} "
+                         "(带X-Review-Draft头进入审阅模式)")
             vi = con.execute(
                 "SELECT * FROM vault_index WHERE skill_id=? AND relpath=?",
                 (row["skill_id"], relpath)).fetchone()
@@ -586,6 +627,19 @@ class Handler(BaseHTTPRequestHandler):
                     not self.headers.get("X-Include-Retired"):
                 return self.send_text(
                     410, f"该skill已retired: {skill_id} (带X-Include-Retired头可查阅)")
+            reds = con.execute(
+                "SELECT COUNT(*) FROM scan_reports WHERE skill_id=? "
+                "AND severity='red'", (row["skill_id"],)).fetchone()[0]
+            if row["status"] == "draft" and \
+                    not self.headers.get("X-Review-Draft"):
+                return self.send_text(
+                    403, f"该skill是draft(未过审): {skill_id} — "
+                         "默认读面不放行。带X-Review-Draft头进入审阅模式"
+                         "(red报告挂横幅)。经图'待审区'段可见书名。")
+            banner = ""
+            if row["status"] == "draft" and reds:
+                banner = (f"> ⚠️ 入关报告带{reds}条red — 审阅时过目, "
+                          "转正须ack_red签名。扫描详情: POST /skill查询。\n\n")
             flds = {}
             for f in rows(con.execute(
                     "SELECT field, value FROM skill_fields WHERE skill_id = ?",
@@ -603,7 +657,7 @@ class Handler(BaseHTTPRequestHandler):
             tail = ("\n\n---\n用完顺手记一笔: POST /event "
                     '{"kind":"skill.telemetry.expand","operator":"<你>","skill_id":"'
                     f'{row["name"]}' + '"} — 好用/没用, 你判断.)')
-            return self.send_text(200, head + row["body"] + tail)
+            return self.send_text(200, banner + head + row["body"] + tail)
         finally:
             con.close()
 
@@ -748,22 +802,47 @@ class Handler(BaseHTTPRequestHandler):
                     con.commit()
                     return self.send_text(200, "已落账。只记不动: 账本不触发任何变更。")
 
-                resp = self.govern(con, kind, operator, body)
-                if resp[0] < 300:  # 动作成功才落账
-                    # one-mutation budget: govern 动作成功后、落账前检查。
-                    # 顺序说明: 先看动作合法性(404/409短路), 再看预算——
-                    # 这样 429 响应里的"已有N笔"都是真实落账数。
-                    denied = budget_check(con, operator)
-                    if denied:
-                        con.rollback()
-                        return self.send_json(429, denied)
-                    con.execute(
-                        "INSERT INTO events(ts, operator, kind, payload) "
-                        "VALUES(?,?,?,?)",
-                        (now(), operator, kind,
-                         json.dumps(body, ensure_ascii=False)))
-                    con.commit()
-                return self.send_json(resp[0], resp[1])
+                resp = self.governance_flow(con, kind, operator, body)
+                return resp
+        except sqlite3.Error as e:
+            con.rollback()
+            return self.send_text(500, f"ledger write failed: {e}")
+        finally:
+            con.close()
+
+    def governance_flow(self, con, kind, operator, body):
+        """治理动作全流程: govern执行→budget检查→落账→响应。
+        post_event与do_DELETE共用 (Y5: DELETE /skill/<id> = skill.pool.withdraw)"""
+        resp = self.govern(con, kind, operator, body)
+        if resp[0] < 300:  # 动作成功才落账
+            denied = budget_check(con, operator)
+            if denied:
+                con.rollback()
+                return self.send_json(429, denied)
+            con.execute(
+                "INSERT INTO events(ts, operator, kind, payload) "
+                "VALUES(?,?,?,?)",
+                (now(), operator, kind,
+                 json.dumps(body, ensure_ascii=False)))
+            con.commit()
+        return self.send_json(resp[0], resp[1])
+
+    def do_DELETE(self):
+        m = re.match(r"^/skill/([^/]+)$", self.path)
+        if not m:
+            return self.send_text(404, "DELETE /skill/<name|id> (draft撤回)")
+        target = urllib.parse.unquote(m.group(1))
+        try:
+            body = {"kind": "skill.pool.withdraw",
+                    "operator": self.headers.get("X-Operator") or "unknown",
+                    "skill_id": target}
+        except Exception:
+            return self.send_text(400, "bad request")
+        con = db()
+        try:
+            with _lock:
+                return self.governance_flow(con, "skill.pool.withdraw",
+                                            body["operator"], body)
         except sqlite3.Error as e:
             con.rollback()
             return self.send_text(500, f"ledger write failed: {e}")
@@ -778,6 +857,24 @@ class Handler(BaseHTTPRequestHandler):
             return con.execute(
                 "SELECT skill_id, layer, status, baseline_hash FROM skills "
                 "WHERE skill_id = ? OR name = ?", (sid, sid or "")).fetchone()
+
+        if kind == "skill.pool.withdraw":
+            row = get_skill_row()
+            if not row:
+                return 404, {"error": f"skill不存在: {sid}"}
+            if row["status"] != "draft":
+                return 409, {"error": "withdraw只清draft(探针/误提交); "
+                                      "verified馆藏走review:discarded→retired"}
+            con.execute("DELETE FROM skills WHERE skill_id=?",
+                        (row["skill_id"],))
+            con.execute("DELETE FROM skill_fields WHERE skill_id=?",
+                        (row["skill_id"],))
+            con.execute("DELETE FROM scan_reports WHERE skill_id=?",
+                        (row["skill_id"],))
+            # vault附件跟着清(镜像语义: 书撤回, 附件不留守)
+            con.execute("DELETE FROM vault_index WHERE skill_id=?",
+                        (row["skill_id"],))
+            return 200, {"withdrawn": row["skill_id"], "note": "draft已物理撤回"}
 
         if kind == "skill.pool.review":
             row = get_skill_row()

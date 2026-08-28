@@ -95,10 +95,12 @@ def verify_via_api(con=None, quiet=False):
         resp = urllib.request.urlopen(req, timeout=5)
         code = resp.getcode()
         sid = _json.loads(resp.read())["skill_id"]
-        # 探针用完即走
-        dreq = urllib.request.Request(f"http://127.0.0.1:8730/skill/{sid}", method="DELETE")
-        urllib.request.urlopen(dreq, timeout=5)
-        msg = f"写入探针 {code} → skill_id={sid} → 已清理 ✓"
+        # 探针用完即走 (Y5修复: DELETE端点已实现, 不再留残留)
+        dreq = urllib.request.Request(
+            f"http://127.0.0.1:8730/skill/{sid}", method="DELETE",
+            headers={"X-Operator": "fix-fk-selftest"})
+        dresp = urllib.request.urlopen(dreq, timeout=5)
+        msg = f"写入探针 {code} → skill_id={sid} → DELETE {dresp.getcode()} 已清理 ✓"
     except urllib.error.HTTPError as e:
         msg = f"写入探针失败: {e.code} {e.read()[:120]}"
     except Exception as e:

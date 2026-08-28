@@ -77,14 +77,15 @@ check("第2笔429", s == 429, b[:120])
 check("429带countdown", "window_resets_at" in d, str(d.get("window_resets_at")))
 check("429带契约hint", "单次巡视至多一个" in d.get("hint", ""), d.get("hint", "")[:60])
 
-# 3b. 429 时动作本身未执行 (书b仍是draft)
+# 3b. 429 时动作本身未执行 (书b仍是draft) — R3后draft默认403, 走审阅头读状态
 try:
-    with urllib.request.urlopen(BASE + "/skill/budget-test-b", timeout=5) as r:
+    req = urllib.request.Request(BASE + "/skill/budget-test-b",
+                                 headers={"X-Review-Draft": "1"})
+    with urllib.request.urlopen(req, timeout=5) as r:
         body = r.read().decode()
 except urllib.error.HTTPError as e:
     body = e.read().decode()
-check("被拒动作未生效(b仍draft)", '"status": "draft"' in body or "draft" in body,
-      body[:80])
+check("被拒动作未生效(b仍draft)", "draft" in body, body[:80])
 
 # 4. 豁免: hui 第2笔直接放行
 s, b = post("/event", {"kind": "skill.pool.review", "operator": "hui",

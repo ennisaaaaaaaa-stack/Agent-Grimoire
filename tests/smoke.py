@@ -78,6 +78,10 @@ s, b = post("/skill", {
 check("自梳理提交→draft起步", s == 200 and '"draft"' in b, b[:120])
 d1 = json.loads(b)
 check("干净正文零findings", d1["scan"]["count"] == 0, f"count={d1['scan']['count']}")
+# 2.5 R3后消费者读面只亮verified — 转正后再走下游读取断言
+s, b = post("/event", {"kind": "skill.pool.review", "operator": "巡山使",
+                       "skill_id": "归还术-扫描修复流程", "decision": "promoted"})
+check("转正(draft→verified)", s == 200 and "verified" in b, b[:80])
 
 # 3. 提交一个带注入话术的skill — 文面扫应标red, 但写入畅通
 s, b = post("/skill", {
@@ -166,16 +170,29 @@ check("经图刷新即真(新skill进映射)", "归还术-扫描修复流程" in
 s, b = post("/skill", {"name": "归还术-扫描修复流程", "body": "x"})
 check("同名挡(409, 改写走rewrite)", s == 409)
 
-# 10. 山系自动生长: submit带过的tag已种进树
+# 10. 山系: verified书点亮的山进树(维修/流程←归还术);
+#     draft-only山(测试←毒草/重复的书)不进默认经图 — R3语义
 s, b = get("/map")
-check("tag自动种山(维修/流程/测试进树)",
-      s == 200 and "维修" in b and "流程" in b and "测试" in b)
+_lines = b.splitlines()
+check("tag自动种山(verified点亮的维修/流程进树)",
+      s == 200 and "维修" in _lines and "流程" in _lines)
+check("draft-only山不进默认经图(测试山不亮)", "测试" not in _lines)
 
 # 11. 暗区点名: 毒草/重复的书从未被push/expand→在暗区; 归还术被expand过→不在
+#     (R3后draft不进默认经图, 但暗区是巡山使读面, 照常点名draft)
 s, b = get("/darkzone")
 check("暗区点名(毒草在, 归还术不在)",
       s == 200 and "毒草-测试用" in b and "归还术" not in b
       and "逐本判断" in b)
+# 11.5 R3核心: 毒草draft不进默认经图, 正文403; 带审阅头可读且带red横幅
+s, b = get("/map")
+_dark = [l for l in b.splitlines() if "待审区" in l or "毒草" in l][:2]
+check("毒草不进默认经图(R3)", "毒草-测试用" not in b and "待审区" in b,
+      "; ".join(_dark))
+s, b = get("/skill/毒草-测试用")
+check("毒草draft正文默认403(R3)", s == 403, b[:100])
+s, b = get("/skill/毒草-测试用", headers={"X-Review-Draft": "1"})
+check("审阅模式可读+red横幅", s == 200 and "red" in b, b[:150])
 
 # 12. 别名折叠: repair→维修 (查询侧归并; 别名经治理面登记, 不直连库)
 s, b = post("/event", {"kind": "skill.tag.alias.add", "operator": "巡山使",
@@ -202,8 +219,11 @@ hints = d4.get("tag_hints", [])
 check("tag查重h进响应", s == 200 and len(hints) >= 2,
       " | ".join(hints)[:160])
 s, b = get("/skill/查重测试书")
-check("折叠后入库(repair→维修, 组合tag规整)",
-      "维修" in b and "流程·维修" in b and '"repair"' not in b, b[:200])
+check("draft正文默认403(R3修复后)", s == 403, b[:120])
+s, b = get("/skill/查重测试书", headers={"X-Review-Draft": "1"})
+check("审阅头可读draft+折叠结果(repair→维修, 组合tag规整)",
+      s == 200 and "维修" in b and "流程·维修" in b and '"repair"' not in b,
+      b[:200])
 
 # 14.5 merge到全新tag: 改名场景 — 目标tag不存在时别名必须真迁移 (照照复验残留)
 #      旧姿势: tags无该行→UPDATE零行→旧tag又被DELETE→别名整行蒸发
