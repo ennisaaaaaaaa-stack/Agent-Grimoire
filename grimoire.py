@@ -38,6 +38,10 @@ BUDGET_WINDOW = int(os.environ.get("GRIMOIRE_BUDGET_WINDOW", 24 * 3600))
 BUDGET_MAX = int(os.environ.get("GRIMOIRE_BUDGET_MAX", 2))
 BUDGET_EXEMPT = {"hui"}
 
+# ── 三层门 (v0.5): 库主身份。读面全开(含family/private全部)。 ──
+# 与 BUDGET_EXEMPT 同人但语义不同: 那边是治理豁免, 这边是可见性豁免。
+LIBRARY_OWNER = os.environ.get("GRIMOIRE_OWNER", "hui")
+
 # 契约 v0.2 域6全量事件（skill.checkin.scan 由提交路径内部落账，不经 POST /event）
 TELEMETRY_KINDS = {          # 只记不动：遥测永远不触发变更
     "skill.telemetry.push",
@@ -126,19 +130,20 @@ def rows(rows_or_none):
 
 # ---------------- 经图 (opening map) ----------------
 
-def render_map():
+def render_map(operator: str = "unknown"):
     con = db()
     try:
         tags = con.execute(
             "SELECT tag, parent, note FROM tags ORDER BY tag").fetchall()
         # R3(外聘审计): 默认经图只亮verified书点亮的山 — draft-only山不进开场注入
         # (山照常长: tags表submit时照种; 没进馆的书不点亮山头。巡山使走/darkzone看全量)
+        vis_clause, vis_args = visible_skills_clause(operator)
         mapping = con.execute(
             "SELECT s.name, s.layer, f.value AS tags "
             "FROM skills s LEFT JOIN skill_fields f "
             "ON f.skill_id = s.skill_id AND f.field = 'tags' "
-            "WHERE s.status = 'verified' AND s.layer != 'archive' "
-            "ORDER BY s.name").fetchall()
+            "WHERE s.status = 'verified' AND s.layer != 'archive'" + vis_clause +
+            " ORDER BY s.name", vis_args).fetchall()
         by_tag = {}
         for m in rows(mapping):
             for t in (json.loads(m["tags"]) if m["tags"] else []):
@@ -188,10 +193,11 @@ def render_map():
             lines.append("")
 
         # core层全文常驻 (契约: core=保底常驻, 每session全文)
+        vis_clause, vis_args = visible_skills_clause(operator)  # 同一把门
         core_rows = con.execute(
             "SELECT s.skill_id, s.name, s.body FROM skills s "
-            "WHERE s.layer = 'core' AND s.status != 'retired' "
-            "ORDER BY s.name").fetchall()
+            "WHERE s.layer = 'core' AND s.status != 'retired'"
+            + vis_clause + " ORDER BY s.name", vis_args).fetchall()
         if core_rows:
             lines.append("## core层全文常驻")
             for c in rows(core_rows):
@@ -204,8 +210,8 @@ def render_map():
             "SELECT s.name, f.value AS trigger FROM skills s "
             "JOIN skill_fields f ON f.skill_id = s.skill_id "
             "AND f.field = 'trigger' "
-            "WHERE s.layer = 'pinned' AND s.status != 'retired' "
-            "ORDER BY s.name").fetchall()
+            "WHERE s.layer = 'pinned' AND s.status != 'retired'"
+            + vis_clause + " ORDER BY s.name", vis_args).fetchall()
         if pinned_rows:
             lines.append("## pinned层描述行")
             for p in rows(pinned_rows):
@@ -221,8 +227,9 @@ def render_map():
             "SELECT s.name, s.layer, f.value AS tags "
             "FROM skills s LEFT JOIN skill_fields f "
             "ON f.skill_id = s.skill_id AND f.field = 'tags' "
-            "WHERE s.status = 'verified' AND s.layer != 'archive' "
-            "ORDER BY s.name").fetchall()
+            "WHERE s.status = 'verified' AND s.layer != 'archive'"
+            + vis_clause +
+            " ORDER BY s.name", vis_args).fetchall()
         if mapping:
             by_tag = {}
             for m in rows(mapping):
@@ -385,15 +392,62 @@ def scan_skill(con, name, body, exclude_id=None):
 
 # ---------------- handler ----------------
 
+def skill_visible(con, skill_id: str, operator: str) -> bool:
+    """三层门 (v0.5) 单本判定: get_skill / vault 两面用。
+    private 无权→调用方装404(字节与真404一致), 这里只答可见与否。"""
+    row = con.execute(
+        "SELECT visibility FROM skills WHERE skill_id = ?",
+        (skill_id,)).fetchone()
+    if not row:
+        return True  # 行不在(不该发生)——归404主路径, 不在此装
+    vis = row["visibility"] or "public"
+    if vis == "public":
+        return True
+    if operator == LIBRARY_OWNER:
+        return True
+    ok = con.execute(
+        "SELECT 1 FROM visibility_rosters WHERE "
+        "(scope = 'family' AND operator = ? AND ? = 'family') OR "
+        "(scope = ? AND operator = ?)",
+        (operator, vis, f"skill:{skill_id}", operator)).fetchone()
+    return bool(ok)
+
+
+def visible_skills_clause(operator: str, alias: str = "s") -> tuple:
+    """三层门 (v0.5) SQL 片段: 返回 (WHERE 片段, 参数) 过滤不可见 skill。
+
+    public = 任何人; family = 家人名单(visibility_rosters scope='family');
+    private = 库主(LIBRARY_OWNER)或该skill的 audience 白名单(scope='skill:<id>')。
+    名单为空时 family/private 全隐(白名单制, 不是黑名单制)。
+    """
+    if operator == LIBRARY_OWNER:
+        return ("", [])
+    return (
+        f" AND ({alias}.visibility = 'public'"
+        f" OR ({alias}.visibility = 'family' AND EXISTS ("
+        f"  SELECT 1 FROM visibility_rosters vr WHERE vr.scope = 'family'"
+        f"  AND vr.operator = ?))"
+        f" OR ({alias}.visibility = 'private' AND EXISTS ("
+        f"  SELECT 1 FROM visibility_rosters vr WHERE vr.scope = 'skill:' || {alias}.skill_id"
+        f"  AND vr.operator = ?)))",
+        [operator, operator],
+    )
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    @property
+    def operator(self) -> str:
+        """读面身份: X-Operator 头, 缺省 unknown。防误看不防冒领(R2 管后者)。"""
+        return self.headers.get("X-Operator") or "unknown"
 
     def do_GET(self):
         if self.path == "/health":
             return self.send_text(200, "ok")
         if self.path == "/map":
-            return self.send_text(200, render_map())
+            return self.send_text(200, render_map(operator=self.operator))
         if self.path == "/darkzone":
             return self.get_darkzone()
         if self.path.split("?")[0] == "/vault":
@@ -433,7 +487,8 @@ class Handler(BaseHTTPRequestHandler):
         """暗区点名(机械半边): 从未被push/expand过的skill名单。
         archive层除外——它们已被巡山使判过, 点名是给还没被判断的书的保底。
         出口必须带全量名单——暗区skill是唯一没有遥测数据替它们说话的,
-        名单是它们的保底。逐本判断仍是巡山使的活。"""
+        名单是它们的保底。逐本判断仍是巡山使的活。
+        三层门(v0.5): 按operator过滤——不该看的人连"有这本书"都不知道。"""
         con = db()
         try:
             names = set()
@@ -445,12 +500,13 @@ class Handler(BaseHTTPRequestHandler):
                 v = p.get("skill_id") or p.get("name")
                 if v:
                     names.add(v)
+            vis_clause, vis_args = visible_skills_clause(self.operator)
             out = []
             for r in rows(con.execute(
                     "SELECT s.skill_id, s.name, s.layer, s.status "
                     "FROM skills s WHERE s.status != 'retired' "
-                    "AND s.layer != 'archive' "
-                    "ORDER BY s.name").fetchall()):
+                    "AND s.layer != 'archive'" + vis_clause +
+                    " ORDER BY s.name", vis_args).fetchall()):
                 if r["name"] not in names and r["skill_id"] not in names:
                     out.append(f"{r['name']}  [{r['layer']}/{r['status']}]")
             body = "暗区点名(从未被push/expand):\n" + ("\n".join(out)
@@ -509,12 +565,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             tag = self.canonical_tag(con, tag)  # 查询侧归并: 别名折叠到正字
             out = []
+            vis_clause, vis_args = visible_skills_clause(self.operator)
             for r in rows(con.execute(
                     "SELECT s.skill_id, s.name, s.layer, s.status, f.value AS tags "
                     "FROM skills s LEFT JOIN skill_fields f "
                     "ON f.skill_id = s.skill_id AND f.field = 'tags' "
-                    "WHERE s.status = 'verified' AND s.layer != 'archive' "
-                    "ORDER BY s.name").fetchall()):
+                    "WHERE s.status = 'verified' AND s.layer != 'archive'"
+                    + vis_clause +
+                    " ORDER BY s.name", vis_args).fetchall()):
                 taglist = json.loads(r["tags"]) if r["tags"] else []
                 if tag in taglist or tag in [t.lower() for t in taglist]:
                     trig = con.execute(
@@ -545,6 +603,9 @@ class Handler(BaseHTTPRequestHandler):
                     (skill,)).fetchone()
                 if not row:
                     return self.send_text(404, f"skill不存在: {skill}")
+                # 三层门(v0.5): 不可见→装404(三个vault面同律)
+                if not skill_visible(con, row["skill_id"], self.operator):
+                    return self.send_text(404, f"skill不存在: {skill}")
                 fl = rows(con.execute(
                     "SELECT relpath, size, sha256, binary, synced_at "
                     "FROM vault_index WHERE skill_id=? ORDER BY relpath",
@@ -559,12 +620,17 @@ class Handler(BaseHTTPRequestHandler):
                              "binary以base64返回")
                 return self.send_text(200, "\n".join(lines))
             # 全馆统计
+            vis_clause, vis_args = visible_skills_clause(self.operator)
             st = con.execute(
-                "SELECT count(*) n, sum(size) sz FROM vault_index").fetchone()
+                "SELECT count(*) n, sum(size) sz FROM vault_index v "
+                "JOIN skills s ON s.skill_id = v.skill_id WHERE 1=1"
+                + vis_clause, vis_args).fetchone()
             top = rows(con.execute(
                 "SELECT s.name, count(*) n, sum(v.size) sz "
                 "FROM vault_index v JOIN skills s ON s.skill_id=v.skill_id "
-                "GROUP BY v.skill_id ORDER BY sz DESC LIMIT 10").fetchall())
+                "WHERE 1=1" + vis_clause +
+                " GROUP BY v.skill_id ORDER BY sz DESC LIMIT 10",
+                vis_args).fetchall())
             lines = [f"# vault 全馆: {st['n']} files, "
                      f"{(st['sz'] or 0)/1024/1024:.1f} MB", "", "## 最重的10位:"]
             for t in top:
@@ -581,6 +647,9 @@ class Handler(BaseHTTPRequestHandler):
             row = con.execute(
                 "SELECT skill_id FROM skills WHERE name=?", (skill,)).fetchone()
             if not row:
+                return self.send_text(404, f"skill不存在: {skill}")
+            # 三层门(v0.5): 不可见→装404(与get_skill同律, 不泄露存在性)
+            if not skill_visible(con, row["skill_id"], self.operator):
                 return self.send_text(404, f"skill不存在: {skill}")
             # R3: draft附件默认不外发 — 审阅者带X-Review-Draft取
             if not self.headers.get("X-Review-Draft") and \
@@ -622,6 +691,10 @@ class Handler(BaseHTTPRequestHandler):
                     "WHERE f.value LIKE ?",
                     (f'%"{esc}"%',)).fetchone()
             if not row:
+                return self.send_text(404, "not found")
+            # 三层门(v0.5): 不可见→装404, 与真404字节一致——不泄露存在性。
+            # 检查在 retired/draft 之前: 不该看的人连"这是draft/retired"都不知道。
+            if not skill_visible(con, row["skill_id"], self.operator):
                 return self.send_text(404, "not found")
             if row["status"] == "retired" and \
                     not self.headers.get("X-Include-Retired"):
@@ -1126,6 +1199,17 @@ def init_db():
     _vault_schema = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                  "schema_vault.sql")
     con.executescript(open(_vault_schema).read())
+    # 三层门 (v0.5): 可见性分档+名单。visibility 列 ALTER 加(先查后加, 幂等);
+    # rosters 表 executescript。名单内容=部署态数据, 留空起步, 库主拍板填。
+    _vis_schema = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "schema_visibility.sql")
+    con.executescript(open(_vis_schema).read())
+    cols = [r[1] for r in con.execute("PRAGMA table_info(skills)").fetchall()]
+    if "visibility" not in cols:
+        con.execute("ALTER TABLE skills ADD COLUMN visibility TEXT "
+                    "NOT NULL DEFAULT 'public' "
+                    "CHECK(visibility IN ('public','family','private'))")
+        print("visibility column added (default public, existing skills unaffected)")
     con.commit()
     con.close()
     print("initialized:", DB)
