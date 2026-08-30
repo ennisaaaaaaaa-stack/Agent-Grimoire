@@ -13,7 +13,7 @@
 import atexit
 import json
 import os
-import pathlib
+import pathlib as _pl
 import subprocess
 import sys
 import tempfile
@@ -57,7 +57,7 @@ def post(path, obj, headers=None):
 _tmpdir = tempfile.TemporaryDirectory(prefix="grimoire-vis-smoke-")
 _srv = subprocess.Popen(
     [sys.executable, "grimoire.py", str(_PORT)],
-    cwd="/home/ubuntu/Agent-Grimoire",
+    cwd=str(_pl.Path(__file__).resolve().parent.parent),
     env={**os.environ, "GRIMOIRE_DB": _tmpdir.name + "/vis.db",
          "GRIMOIRE_BUDGET_WINDOW": "3600", "GRIMOIRE_BUDGET_MAX": "50"},
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -79,7 +79,7 @@ for name, vis in [("公开手册-public", "public"), ("家传心法-family", "fa
 
 # 转正 + 设 visibility: 直接动测试库(治理事件走API, 字段直改——
 # visibility 是库主的数据面操作, 不走巡山使治理流)
-_db = pathlib.Path(_tmpdir.name) / "vis.db"
+_db = _pl.Path(_tmpdir.name) / "vis.db"
 import sqlite3
 con = sqlite3.connect(_db)
 # 先找出三本书的 skill_id
@@ -158,7 +158,7 @@ _vdir.mkdir(parents=True, exist_ok=True)
 (_vdir / "note.md").write_text("秘密附件")
 # 注: VAULT_DIR 在 server 启动时读取, 上面 os.environ 改的是测试进程——
 # server 侧 vault 落盘路径是 cwd/vault。补写到 server 视角路径:
-_vdir2 = _pl.Path("/home/ubuntu/Agent-Grimoire/vault") / ids["密卷-private"] / "refs"
+_vdir2 = _pl.Path(__file__).resolve().parent.parent / "vault" / ids["密卷-private"] / "refs"
 try:
     _vdir2.mkdir(parents=True, exist_ok=True)
     (_vdir2 / "note.md").write_text("秘密附件")
