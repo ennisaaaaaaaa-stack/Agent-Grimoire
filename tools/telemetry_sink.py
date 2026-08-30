@@ -40,9 +40,11 @@ def _match_entry(tool_name, args):
     try:
         m = _MCP_RE.match(tool_name or "")
         if m:
+            # ref 形状归一(库内连字符/运行时下划线): SQL侧replace折成同形再比
             row = con.execute(
                 "SELECT entry_id FROM tool_entries "
-                "WHERE kind='mcp' AND ref=? AND status='active'",
+                "WHERE kind='mcp' AND replace(ref,'-','_')=? "
+                "AND status='active'",
                 (_norm_ref(m.group(1)),)).fetchone()
             if row:
                 return row["entry_id"], "mcp", m.group(1)
