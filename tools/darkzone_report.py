@@ -7,6 +7,7 @@
 分组依据是 DB 里的 source 字段 (import 事件时落账), 不是日期猜测。
 用法: python3 darkzone_report.py   # 只读, 零写入
 """
+import sys
 import json
 import pathlib
 import re
@@ -52,4 +53,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

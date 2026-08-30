@@ -11,6 +11,7 @@
 - 只记不动: events 表只追加, 不触发任何变更
 - 扫描坛建藏书阁门口: 所有写入统一过(含自梳理)
 """
+import sys
 import json
 import os
 import re
@@ -1249,4 +1250,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
