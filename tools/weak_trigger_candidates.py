@@ -6,6 +6,7 @@
 Patrol-003 已证机械判据分不开这两者(伪精度销案), 但名单本身是机械的。
 用法: python3 weak_trigger_candidates.py   # 只读
 """
+import sys
 import json
 import pathlib
 import sqlite3
@@ -32,4 +33,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
