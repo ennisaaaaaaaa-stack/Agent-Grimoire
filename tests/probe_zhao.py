@@ -4,6 +4,7 @@ v2差异: BASE走18731(烟测隔离区口段), 网络层照样真HTTP不mock。
 fixture自种: 探针需要'归还术-扫描修复流程'+别名repair — 走治理面事件, 不碰live。"""
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -57,7 +58,7 @@ import tempfile
 _tmp = tempfile.TemporaryDirectory(prefix="grimoire-probe-")
 _srv = subprocess.Popen(
     [sys.executable, "grimoire.py", PORT],
-    cwd="/home/ubuntu/Agent-Grimoire",
+    cwd=str(Path(__file__).resolve().parent.parent),
     env={**os.environ, "GRIMOIRE_DB": _tmp.name + "/probe.db"},
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 atexit.register(lambda: (_srv.terminate(), _srv.wait(timeout=5)))

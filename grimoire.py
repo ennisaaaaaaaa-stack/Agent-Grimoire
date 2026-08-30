@@ -14,6 +14,7 @@
 import json
 import os
 import re
+import shutil
 import sqlite3
 import hashlib
 import threading
@@ -196,7 +197,7 @@ def render_map(operator: str = "unknown"):
         vis_clause, vis_args = visible_skills_clause(operator)  # 同一把门
         core_rows = con.execute(
             "SELECT s.skill_id, s.name, s.body FROM skills s "
-            "WHERE s.layer = 'core' AND s.status != 'retired'"
+            "WHERE s.layer = 'core' AND s.status = 'verified'"
             + vis_clause + " ORDER BY s.name", vis_args).fetchall()
         if core_rows:
             lines.append("## core层全文常驻")
@@ -210,7 +211,7 @@ def render_map(operator: str = "unknown"):
             "SELECT s.name, f.value AS trigger FROM skills s "
             "JOIN skill_fields f ON f.skill_id = s.skill_id "
             "AND f.field = 'trigger' "
-            "WHERE s.layer = 'pinned' AND s.status != 'retired'"
+            "WHERE s.layer = 'pinned' AND s.status = 'verified'"
             + vis_clause + " ORDER BY s.name", vis_args).fetchall()
         if pinned_rows:
             lines.append("## pinned层描述行")
@@ -651,11 +652,17 @@ class Handler(BaseHTTPRequestHandler):
             # 三层门(v0.5): 不可见→装404(与get_skill同律, 不泄露存在性)
             if not skill_visible(con, row["skill_id"], self.operator):
                 return self.send_text(404, f"skill不存在: {skill}")
-            # R3: draft附件默认不外发 — 审阅者带X-Review-Draft取
-            if not self.headers.get("X-Review-Draft") and \
-                    con.execute(
-                        "SELECT status FROM skills WHERE skill_id=?",
-                        (row["skill_id"],)).fetchone()[0] != "verified":
+            # R3: draft/retired附件默认不外发 — 审阅者带X-Review-Draft取
+            # (照照四审·两把钥匙: 审阅态统一X-Review-Draft一把钥匙
+            #  X-Review-Draft一把钥匙管审阅态, 消息里写清这把钥匙开什么)
+            status = con.execute(
+                "SELECT status FROM skills WHERE skill_id=?",
+                (row["skill_id"],)).fetchone()[0]
+            if status != "verified" and not self.headers.get("X-Review-Draft"):
+                if status == "retired":
+                    return self.send_text(
+                        410, f"该skill已retired: {skill} "
+                             "(带X-Review-Draft头进入审阅模式)")
                 return self.send_text(
                     403, f"draft skill附件不外发: {skill} "
                          "(带X-Review-Draft头进入审阅模式)")
@@ -667,7 +674,9 @@ class Handler(BaseHTTPRequestHandler):
             # 路径安全: relpath已在索引内(入库时过审), 直接拼
             fpath = os.path.join(VAULT_DIR, row["skill_id"], relpath)
             if not os.path.isfile(fpath):
-                return self.send_text(410, f"索引在但文件丢失: {fpath}")
+                # P5(照照四审): 只报relpath——一个把不泄露存在性做到字节级的
+                # 系统, 错误页里广播服务器绝对路径是哲学不一致
+                return self.send_text(410, f"索引在但文件丢失: {relpath}")
             data = open(fpath, "rb").read()
             if vi["binary"]:
                 import base64
@@ -697,9 +706,9 @@ class Handler(BaseHTTPRequestHandler):
             if not skill_visible(con, row["skill_id"], self.operator):
                 return self.send_text(404, "not found")
             if row["status"] == "retired" and \
-                    not self.headers.get("X-Include-Retired"):
+                    not self.headers.get("X-Review-Draft"):
                 return self.send_text(
-                    410, f"该skill已retired: {skill_id} (带X-Include-Retired头可查阅)")
+                    410, f"该skill已retired: {skill_id} (带X-Review-Draft头可查阅)")
             reds = con.execute(
                 "SELECT COUNT(*) FROM scan_reports WHERE skill_id=? "
                 "AND severity='red'", (row["skill_id"],)).fetchone()[0]
@@ -945,6 +954,11 @@ class Handler(BaseHTTPRequestHandler):
                             (row["skill_id"],))
             con.execute("DELETE FROM skills WHERE skill_id=?",
                         (row["skill_id"],))
+            # P3c(照照四审): vault/<sid>/ 附件目录跟着撤 — 只清索引行会留
+            # 不可达但占盘的孤儿目录 (withdraw的语义就是物理撤回)
+            vdir = os.path.join(VAULT_DIR, row["skill_id"])
+            if os.path.isdir(vdir):
+                shutil.rmtree(vdir, ignore_errors=True)
             return 200, {"withdrawn": row["skill_id"], "note": "draft已物理撤回"}
 
         if kind == "skill.pool.review":
@@ -973,6 +987,16 @@ class Handler(BaseHTTPRequestHandler):
             layer = body.get("layer")
             if layer not in ("core", "pinned", "index", "archive"):
                 return 400, {"error": "layer须为 core|pinned|index|archive"}
+            # R3侧门(照照四审): core/pinned是注入面, 非verified书不许挪入——
+            # 否则draft带注入话术roster.update一下就进开场注入(与core/pinned
+            # 查询只亮verified同一道门的两半; retired挪入返回200但被查询滤掉
+            # = 'UPDATE成功'与'UPDATE有意义'是两回事, 一并堵死)
+            if layer in ("core", "pinned") and row["status"] != "verified":
+                return 409, {
+                    "error": f"layer={layer}是注入面, 只收verified书 "
+                             f"(当前status={row['status']}); "
+                             "draft先走skill.pool.review转正",
+                    "hint": "core/pinned只亮verified(与读面同一道门)"}
             con.execute("UPDATE skills SET layer=?, updated_at=? WHERE skill_id=?",
                         (layer, now(), row["skill_id"]))
             return 200, {"skill_id": row["skill_id"], "layer": layer}

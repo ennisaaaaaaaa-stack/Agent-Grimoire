@@ -3,6 +3,7 @@
 独立于烟测套件, 直接打真行为。 2026-08-29 凌晨, 审计修复轮。"""
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
@@ -11,7 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-REPO = "/home/ubuntu/Agent-Grimoire"
+REPO = str(Path(__file__).resolve().parent.parent)
 results = []
 
 

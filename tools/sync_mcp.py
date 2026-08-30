@@ -18,6 +18,12 @@ import sys
 import urllib.request
 from datetime import datetime, timezone
 
+
+def _norm_ref(server):
+    """server名归一化: config.yaml连字符 / Hermes运行时下划线, 折到同一边对账。
+    (Bug A照照四审: 两边形状不一致→5/6个server遥测静默漏账)"""
+    return (server or "").replace("-", "_")
+
 try:
     import yaml
 except ImportError:
@@ -74,15 +80,22 @@ def main():
     dry = "--dry-run" in sys.argv
     servers = load_mcp_servers()
     print(f"config.yaml mcp_servers: {servers}")
+    # Bug B(照照四审): fresh clone 无 grimoire.db 时直接 no such table 崩——
+    # 库还没初始化就明说, 不留半截 traceback
+    if not os.path.exists(DB):
+        print(f"fresh 库不存在: {DB}\n先跑 python3 grimoire.py init_db 初始化再同步")
+        return 1
     # 读现有 mcp entries
     con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
     have = {r["ref"]: r for r in con.execute(
         "SELECT * FROM tool_entries WHERE kind='mcp'").fetchall()}
     con.close()
-    to_add = [s for s in servers if s not in have]
+    to_add = [s for s in servers
+              if _norm_ref(s) not in {_norm_ref(r) for r in have}]
     to_retire = [r for ref, r in have.items()
-                 if r["status"] == "active" and ref not in servers]
+                 if r["status"] == "active"
+                 and _norm_ref(ref) not in {_norm_ref(s) for s in servers}]
     if not to_add and not to_retire:
         print("sync: 无变化 (幂等)")
         return

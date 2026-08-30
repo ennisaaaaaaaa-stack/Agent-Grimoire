@@ -8,7 +8,8 @@
 1. `curl -s http://127.0.0.1:8730/health` —— 不通则整轮跳过，报告"服务未起"，什么都不动。
 2. `curl -s http://127.0.0.1:8730/darkzone` —— 拿暗区点名名单。
 3. 机械半边直接跑工具（不要手工拼数字/名单——那是token白烧）:
-   - `python3 tools/patrol_report_head.py [上轮UTC]` —— 四数字+暗区分组点名+超限山头, 粘进报告头部
+   - `python3 tools/patrol_report_head.py [上轮UTC]` —— 四数字+暗区分组点名+超限山头, 粘进报告头部。
+     报告头自带 `produced-by: patrol_report_head.py` 印章（照照对账用）——没有印章=协议退化drift信号，复刻者不可手拼。
    - `python3 tools/weak_trigger_candidates.py` —— 弱trigger候选名单(判断仍归你)
 
 ## 开工同步（契约 v0.2 欠账落账：巡山使顺路跑）

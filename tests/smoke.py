@@ -2,6 +2,7 @@
 """山海烟测 — 丝滑判据四查 + 扫描三面真触发。跑真HTTP, 不mock。"""
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
@@ -46,7 +47,7 @@ def post(path, obj):
 _tmpdir = tempfile.TemporaryDirectory(prefix="grimoire-smoke-")
 _srv = subprocess.Popen(
     [sys.executable, "grimoire.py", str(_SMOKE_PORT)],
-    cwd="/home/ubuntu/Agent-Grimoire",
+    cwd=str(Path(__file__).resolve().parent.parent),
     env={**os.environ, "GRIMOIRE_DB": _tmpdir.name + "/smoke.db",
          # 烟测预算: 小窗口大上限不干扰既有断言, 预算专项用独立迷你实例测
          "GRIMOIRE_BUDGET_WINDOW": "3600", "GRIMOIRE_BUDGET_MAX": "50"},
@@ -237,6 +238,43 @@ except urllib.error.HTTPError as _e:
 check("withdraw删draft=200", _ws == 200 and "已物理撤回" in _wb, _wb[:80])
 s, b = get("/skill/查重测试书", headers={"X-Review-Draft": "1"})
 check("withdraw后404", s == 404)
+
+# 14.7 P3c(照照四审): withdraw 连带清 vault/<sid>/ 附件目录 — 只清索引行留孤儿
+import pathlib as _pl2
+_s2, _b2 = post("/skill", {
+    "operator": "smoke", "name": "ghost-wd", "layer": "index",
+    "fields": {"tags": "[]"}, "body": "# ghost withdraw test"})
+if _s2 == 200:
+    _sid2 = json.loads(_b2)["skill_id"]
+    _vd2 = _pl2.Path(__file__).resolve().parent.parent / "vault" / _sid2
+    _vd2.mkdir(parents=True, exist_ok=True)
+    (_vd2 / "refs.txt").write_text("x")
+    _req = urllib.request.Request(
+        BASE + "/skill/" + urllib.parse.quote(_sid2), method="DELETE",
+        headers={"X-Operator": "smoke"})
+    try:
+        with urllib.request.urlopen(_req, timeout=10) as _r:
+            _ws2 = _r.status
+    except urllib.error.HTTPError as _e:
+        _ws2 = _e.code
+    check("withdraw清vault目录(P3c)", _ws2 == 200 and not _vd2.exists(),
+          f"status={_ws2} dir_exists={_vd2.exists()}")
+else:
+    check("withdraw清vault目录(P3c)·前置submit", False, _b2[:80])
+
+# 14.8 R3侧门(照照四审): draft/retired 挪 core/pinned 应409 — 注入面只收verified
+_s3, _b3 = post("/skill", {
+    "operator": "smoke", "name": "p2-side-door", "layer": "index",
+    "fields": {"tags": "[]"}, "body": "# side door probe"})
+_s4, _b4 = post("/event", {"kind": "skill.roster.update", "operator": "smoke",
+                           "skill_id": "p2-side-door", "layer": "core"})
+check("draft挪core拒绝409(R3侧门)", _s4 == 409, f"{_s4} {_b4[:80]}")
+_s5, _b5 = post("/event", {"kind": "skill.roster.update", "operator": "smoke",
+                           "skill_id": "p2-side-door", "layer": "pinned"})
+check("draft挪pinned拒绝409(R3侧门)", _s5 == 409, f"{_s5} {_b5[:80]}")
+_s6, _b6 = post("/event", {"kind": "skill.pool.withdraw", "operator": "smoke",
+                           "skill_id": "p2-side-door"})
+check("探针书撤回收尾", _s6 == 200, f"{_s6} {_b6[:60]}")
 
 # 14.5 merge到全新tag: 改名场景 — 目标tag不存在时别名必须真迁移 (照照复验残留)
 #      旧姿势: tags无该行→UPDATE零行→旧tag又被DELETE→别名整行蒸发

@@ -21,6 +21,13 @@ import threading
 _lock = threading.Lock()
 _MCP_RE = re.compile(r"^mcp__([a-zA-Z0-9_\-]+)__[a-zA-Z0-9_\-]+$")
 
+
+def _norm_ref(server):
+    """Bug A(照照四审): server名归一化 — config.yaml里是连字符
+    (galatea-garden), Hermes运行时工具名是下划线 (mcp__galatea_garden__…,
+    MCP协议不允许连字符)。两边都折到下划线再对账, 6个server里5个不再静默漏账。"""
+    return (server or "").replace("-", "_")
+
 DB = os.environ.get("GRIMOIRE_DB",
                     os.path.join(os.path.dirname(os.path.dirname(
                         os.path.abspath(__file__))), "grimoire.db"))
@@ -36,7 +43,7 @@ def _match_entry(tool_name, args):
             row = con.execute(
                 "SELECT entry_id FROM tool_entries "
                 "WHERE kind='mcp' AND ref=? AND status='active'",
-                (m.group(1),)).fetchone()
+                (_norm_ref(m.group(1)),)).fetchone()
             if row:
                 return row["entry_id"], "mcp", m.group(1)
             return None, None, None
