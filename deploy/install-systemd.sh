@@ -28,6 +28,16 @@ PYTHON="$(readlink -f "$(command -v python3)")"
 [[ -f "$DIR/grimoire.py" ]] || { echo "grimoire.py not found in $DIR (use --dir)" >&2; exit 1; }
 [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "invalid port: $PORT" >&2; exit 1; }
 
+# Never silently run the service as root. When invoked from a root shell (cron,
+# CI, sudo), default the service user to the owner of the repo directory instead.
+if [[ "$(id -u)" -eq 0 && "$USER_NAME" == "root" ]]; then
+  OWNER="$(stat -c '%U' "$DIR")"
+  if [[ -n "$OWNER" && "$OWNER" != "root" ]]; then
+    echo "note: invoked as root — service will run as '$OWNER' (owner of $DIR); override with --user" >&2
+    USER_NAME="$OWNER"
+  fi
+fi
+
 UNIT_SRC="$DIR/deploy/grimoire.service.template"
 UNIT_DST=/etc/systemd/system/grimoire.service
 
