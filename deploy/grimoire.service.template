@@ -1,0 +1,17 @@
+# Grimoire systemd unit template — placeholders are filled by deploy/install-systemd.sh
+# {{USER}} {{DIR}} {{PORT}} {{PYTHON}} are substituted at install time.
+[Unit]
+Description=Grimoire — shared agent skill library server
+After=network.target
+
+[Service]
+Type=simple
+User={{USER}}
+WorkingDirectory={{DIR}}
+ExecStart={{PYTHON}} grimoire.py {{PORT}}
+Restart=on-failure
+RestartSec=3
+# stdout/stderr go to journald — post-mortem with: journalctl -u grimoire
+
+[Install]
+WantedBy=multi-user.target
