@@ -52,6 +52,7 @@ def main():
         sorted(SKILLS_DIR.glob("*/*/*/SKILL.md"))  # 三层嵌套(mlops/evaluation/...与.archive/...——pathlib的*会匹配点目录，实测不跳过)
     print(f"found {len(files)} SKILL.md")
     ok = fail = skipped = 0
+    new_names = []   # 本轮新入库的书: 转正循环只碰它们, 不再全库扫
     flagged = []
     t0 = time.time()
     for f in files:
@@ -76,6 +77,7 @@ def main():
         })
         if s == 200:
             ok += 1
+            new_names.append(name)  # 只记本轮新入库的, 转正范围收窄到它们
             n = resp.get("scan", {}).get("count", 0)
             if n:
                 sev = [x.get("severity") for x in resp.get("scan", {}).get("findings", [])]
@@ -87,18 +89,18 @@ def main():
             print(f"FAIL {name}: {s} {str(resp)[:120]}")
     print(f"import: {ok} ok, {skipped} in-library, {fail} fail, {time.time()-t0:.1f}s")
 
-    # 批量转正: 在产技能, 本环境日常会话使用中=已验证。账本逐条留痕。
+    # 批量转正(收窄v2, 9/6 巡山使修): 只转正本轮新入库的书——曾经的全库无条件循环
+    # 把待审draft批(9/3洄提交16本)静默转正过, 待审区隔离管不到这个侧门。
+    # 在产技能日常会话使用中=已验证。账本逐条留痕。
     t0 = time.time()
     promoted = 0
-    for f in files:
-        meta, _ = parse_frontmatter(f.read_text(encoding="utf-8", errors="replace"))
-        name = meta.get("name") or f.parent.name
+    for name in new_names:
         s, _ = post("/event", {
             "kind": "skill.pool.review", "operator": "hui",
             "skill_id": name, "decision": "promoted",
             "note": "hermes库批量入馆: 在产技能, 日常会话使用中"})
         promoted += (s == 200)
-    print(f"promoted: {promoted}, {time.time()-t0:.1f}s")
+    print(f"promoted: {promoted} (新入库 {len(new_names)} 本), {time.time()-t0:.1f}s")
 
     # 扫描把哪些真技能标了色(狗糧数据: 报告不拦截, 巡山使后审)
     print(f"\nscan flagged {len(flagged)} skills:")
