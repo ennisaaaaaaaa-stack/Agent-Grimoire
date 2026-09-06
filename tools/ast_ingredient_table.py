@@ -33,7 +33,43 @@ import tree_sitter
 import tree_sitter_python as tsp
 
 TOOL_NAME = "ast_ingredient_table"
-TOOL_VERSION = "0.1.0"
+TOOL_VERSION = "0.2.0"
+SCHEMA_VERSION = "1"   # 输出 JSON 形状版本——加字段时+1，缓存层自动作废
+
+# ── AST 层缓存（graphify 双层缓存复刻，2026-09-06）──
+# 目录结构 cache/ast/v{TOOL_VERSION}-s{SCHEMA_VERSION}/<file.sha256>.json
+# 命中=文件字节没变+工具没变+schema没变 → 直接吃成分表，零重扫。
+# 任何一个变了，目录名不同 → 自然作废，旧 bug 不阴魂（防的是
+# "工具修了 bug 但旧缓存还在被吃"的鬼故事）。
+CACHE_ROOT_NAME = "cache/ast"
+
+
+def _cache_dir(root: Path) -> Path:
+    return root / CACHE_ROOT_NAME / f"v{TOOL_VERSION}-s{SCHEMA_VERSION}"
+
+
+def _cache_lookup(path: Path, sha: str, cache_dir: Path) -> dict | None:
+    f = cache_dir / f"{sha}.json"
+    if not f.exists():
+        return None
+    try:
+        entry = json.loads(f.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    # 双保险：缓存里记的 path/sha 跟当前一致才吃
+    if entry.get("path") == str(path) and entry.get("sha256") == sha:
+        return entry["table"]
+    return None
+
+
+def _cache_store(path: Path, sha: str, table: dict, cache_dir: Path) -> None:
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / f"{sha}.json").write_text(
+            json.dumps({"path": str(path), "sha256": sha, "table": table},
+                       ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass  # 缓存写入失败静默——下次重扫而已
 
 PY_LANGUAGE = tree_sitter.Language(tsp.language())
 
@@ -438,16 +474,25 @@ def discover_local_names(root: Path) -> set[str]:
 
 
 def analyze_file(path: Path, root: Path, local_names: set[str],
-                 stdlib_names: set[str]) -> dict:
+                 stdlib_names: set[str], cache_dir: Path | None = None) -> dict:
     raw = path.read_bytes()
-    table = IngredientTable(root, local_names, stdlib_names)
-    res = table.analyze(raw)
-    return {
+    sha = hashlib.sha256(raw).hexdigest()
+    entry = {
         "path": str(path.relative_to(root)),
-        "sha256": hashlib.sha256(raw).hexdigest(),
+        "sha256": sha,
         "loc": raw.count(b"\n") + (0 if raw.endswith(b"\n") or not raw else 1),
-        **res,
     }
+    if cache_dir is not None:
+        cached = _cache_lookup(path, sha, cache_dir)
+        if cached is not None:
+            entry.update(cached)
+            entry["from_cache"] = True
+            return entry
+    table = IngredientTable(root, local_names, stdlib_names).analyze(raw)
+    if cache_dir is not None:
+        _cache_store(path, sha, table, cache_dir)
+    entry.update(table)
+    return entry
 
 
 def main() -> int:
@@ -458,6 +503,8 @@ def main() -> int:
     ap.add_argument("--sample", type=int, default=0,
                     help="在全部文件里随机抽 N 个（seed 固定=7，可复现）")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--no-cache", action="store_true",
+                    help="禁用 AST 层缓存（v0.2.0+），全量重扫")
     args = ap.parse_args()
 
     root = args.root.resolve()
@@ -483,7 +530,11 @@ def main() -> int:
     local_names = discover_local_names(root)
     stdlib_names = set(sys.stdlib_module_names)
 
-    files = [analyze_file(p, root, local_names, stdlib_names) for p in targets]
+    cache_dir = None if args.no_cache else _cache_dir(root)
+    files = [analyze_file(p, root, local_names, stdlib_names, cache_dir) for p in targets]
+    n_cached = sum(1 for f in files if f.get("from_cache"))
+    for f in files:  # from_cache 是缓存层诊断字段，不进最终报告
+        f.pop("from_cache", None)
 
     summary = {
         "files_analyzed": len(files),
@@ -503,6 +554,12 @@ def main() -> int:
                   f"tree-sitter-python {getattr(tsp, '__version__', '?')}",
         "root": str(root),
         "stdlib_source": f"sys.stdlib_module_names (py {sys.version.split()[0]})",
+        "cache": {
+            "enabled": cache_dir is not None,
+            "dir": str(cache_dir) if cache_dir else None,
+            "hit": n_cached,
+            "miss": len(files) - n_cached,
+        },
         "summary": summary,
         "files": files,
     }
