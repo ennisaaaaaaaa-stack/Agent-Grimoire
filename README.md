@@ -82,6 +82,24 @@ curl -X POST http://127.0.0.1:8730/event -d '{
 - **默认只记不动，不默认 auto**：单体 runtime 的肌肉记忆 auto 合理；共享馆藏的公共变更默认保守，改需要理由。哪天被 fork 成单 runtime 私用，auto 就 defensible（OpenClaw Skill Workshop 对照，骨相差异详见 docs/proposal-tools-partition.md）。
 - **组合 tag 的折槽数学**：整条组合永不折成另一条，折叠只在槽内（每槽查正字/别名归并）——自由组合造出的暗区被槽位定序+查重三档挡在门外。
 
+## 周边工具（tools/）
+
+库的日常运维不靠 LLM 自觉，靠脚本守夜：
+
+| 工具 | 干什么 |
+|---|---|
+| `patrol_expand.py` / `patrol_stats.py` / `patrol_report_head.py` | 巡山使三件套：遥测汇总/统计/报告头 |
+| `weak_trigger_candidates.py` + `batch_rewrite.py` | 弱 trigger 找出来成批改写 |
+| `darkzone_report.py` | 暗区点名报告（从未被 push/expand 的书） |
+| `telemetry_sink.py` | 遥测落地（expand=翻了这本书） |
+| `import_hermes_skills.py` / `sync_vault.py` / `sync_mcp.py` | 从外部体系导入/同步技能 |
+| `tag_dup_audit.py` / `fix_fk_skills_old.py` | tag 查重审计 + 外键修复 |
+| `ast_ingredient_table.py` | AST 成分表：扫 skill 正文里的路径/URL/命令/断言面，审查分诊用（0=干净，数字=值得人工看一眼） |
+| `tools/graph-checkup/` 四件套 | 技能库图算法体检：`build_tag_map.py`（从 /map 自动构建 tag 映射）→ `fetch_skills.py`（拉全部正文）→ `extract_edges.py`（共 tag 弱边＋提及强边）→ `analyze.py`（louvain 聚类 vs 手工分类、god nodes、桥节点、跨社区 surprising 边） |
+| `patrol-protocol.md` | 巡山使巡逻协议（人的文档） |
+
+图算法体检依赖 `networkx` + `python-louvain`：`uv run --with networkx --with python-louvain python tools/graph-checkup/analyze.py`。
+
 ## 测试
 
 ```bash
