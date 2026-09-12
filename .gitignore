@@ -2,3 +2,4 @@ grimoire.db
 __pycache__/
 reports/
 vault/
+.backup-*
