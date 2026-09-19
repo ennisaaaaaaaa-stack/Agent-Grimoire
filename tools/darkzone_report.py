@@ -9,6 +9,7 @@
 """
 import sys
 import json
+import os
 import pathlib
 import re
 import sqlite3
@@ -16,7 +17,7 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DB = str(ROOT / "grimoire.db")
-BASE = "http://127.0.0.1:8730"
+BASE = f"http://127.0.0.1:{os.environ.get('GRIMOIRE_PORT', '8730')}"
 
 
 def main():

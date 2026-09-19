@@ -2,7 +2,7 @@
 """fetch all skill bodies from the skill-library map service → skills-txt/<id>.md (read-only, for graph checkup)"""
 import json, os, time, urllib.request
 
-BASE = "http://127.0.0.1:8730"
+BASE = f"http://127.0.0.1:{os.environ.get('GRIMOIRE_PORT', '8730')}"
 OUT = os.path.join(os.path.dirname(__file__), "skills-txt")
 tagmap = json.load(open(os.path.join(os.path.dirname(__file__), "tag-map.json")))
 

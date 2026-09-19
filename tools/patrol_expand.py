@@ -6,11 +6,12 @@
 每本独立报告, 单本失败(404等)不阻塞其余。其他 - 开头参数不认识即忽略。
 """
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
 
-BASE = "http://127.0.0.1:8730"
+BASE = f"http://127.0.0.1:{os.environ.get('GRIMOIRE_PORT', '8730')}"
 
 
 def expand(name, verdict="巡查阅读"):
