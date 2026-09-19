@@ -4,9 +4,9 @@ skill.description.rewrite (绑 baseline_hash, stale 即拒)。
 用法: python3 batch_rewrite.py manifest.json   # [{"name":..., "trigger":...}, ...]
 每本独立报告成功/失败, 单本失败不阻塞清单其余。
 """
-import json, sys, urllib.error, urllib.request
+import json, os, sys, urllib.error, urllib.request
 
-BASE = "http://127.0.0.1:8730"
+BASE = f"http://127.0.0.1:{os.environ.get('GRIMOIRE_PORT', '8730')}"
 
 def get_baseline(name):
     with urllib.request.urlopen(f"{BASE}/skill/{name}") as r:

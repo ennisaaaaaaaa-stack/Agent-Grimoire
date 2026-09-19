@@ -35,14 +35,16 @@ LISTEN_HOST = "127.0.0.1"
 # ── one-mutation budget (契约v0.2 §策展人: 单次巡视至多一个落盘动作) ──
 # 服务端强制: 同一 operator 在滚动窗口内 governance 事件达到上限后, 第二笔起 429。
 # 窗口/上限可用 GRIMOIRE_BUDGET_WINDOW(秒)/GRIMOIRE_BUDGET_MAX 覆盖 (烟测用小窗)。
-# 豁免: 库主 hui 不受限 (手动批处理是库主特权); 遥测事件不占预算。
+# 豁免: 库主不受限 (手动批处理是库主特权); 遥测事件不占预算。
 BUDGET_WINDOW = int(os.environ.get("GRIMOIRE_BUDGET_WINDOW", 24 * 3600))
 BUDGET_MAX = int(os.environ.get("GRIMOIRE_BUDGET_MAX", 2))
-BUDGET_EXEMPT = {"hui"}
 
 # ── 三层门 (v0.5): 库主身份。读面全开(含family/private全部)。 ──
-# 与 BUDGET_EXEMPT 同人但语义不同: 那边是治理豁免, 这边是可见性豁免。
 LIBRARY_OWNER = os.environ.get("GRIMOIRE_OWNER", "hui")
+
+# 治理豁免 = 库主本人, 跟 LIBRARY_OWNER 联动 (换库主名时两侧一起走)。
+# 语义与上面不同: 这是预算豁免, 那边是可见性豁免。
+BUDGET_EXEMPT = {LIBRARY_OWNER}
 
 # 契约 v0.2 域6全量事件（skill.checkin.scan 由提交路径内部落账，不经 POST /event）
 TELEMETRY_KINDS = {          # 只记不动：遥测永远不触发变更

@@ -8,7 +8,7 @@ import sys
 import json, os, pathlib, re, sqlite3, sys, urllib.request
 
 DB = os.environ.get("GRIMOIRE_DB", str(pathlib.Path(__file__).resolve().parent.parent / "grimoire.db"))
-MAP = "http://127.0.0.1:8730/map"
+MAP = f"http://127.0.0.1:{os.environ.get('GRIMOIRE_PORT', '8730')}/map"
 
 def main():
     con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)

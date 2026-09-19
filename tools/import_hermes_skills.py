@@ -11,7 +11,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-BASE = "http://127.0.0.1:8730"
+BASE = f"http://127.0.0.1:{os.environ.get('GRIMOIRE_PORT', '8730')}"
 SKILLS_DIR = Path(os.environ.get("HERMES_SKILLS_DIR", str(Path.home() / ".hermes" / "skills")))
 
 
