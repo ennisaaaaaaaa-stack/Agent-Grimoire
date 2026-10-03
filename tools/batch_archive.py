@@ -34,12 +34,15 @@ if __name__ == "__main__":
     for name in args:
         if dry:
             layer = None
-            with urllib.request.urlopen(f"{BASE}/skill/{name}") as r:
-                for line in r.read().decode().splitlines():
-                    if line.startswith("layer:"):
-                        layer = line.split(":", 1)[1].split()[0]
-            print(f"DRY  {name}: 当前 layer={layer}"
-                  + (" (已在archive, 幂等重放)" if layer == "archive" else ""))
+            try:
+                with urllib.request.urlopen(f"{BASE}/skill/{name}") as r:
+                    for line in r.read().decode().splitlines():
+                        if line.startswith("layer:"):
+                            layer = line.split(":", 1)[1].split()[0]
+                print(f"DRY  {name}: 当前 layer={layer}"
+                      + (" (已在archive, 幂等重放)" if layer == "archive" else ""))
+            except urllib.error.HTTPError as e:
+                print(f"DRY  {name}: HTTP {e.code} 不存在或不可读")
             continue
         try:
             resp = archive(name)
