@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "created": "2026-10-05",
+  "author": "hui",
+  "task_source": "设计师 10/5 拍板 · zhaozhao拟任务书（spoor 档案 shanhai-routing-control-cases）",
+  "purpose": "山海路由层 control case 测试集：反例 query 对，钉能力地图指纹的松紧。正例测「该想起的能不能想起」，反例测「不该想起的会不会被误想起」——改指纹/改地图前后各跑一遍，反例失守=触发器松了。",
+  "cluster_notes": {
+    "forensics三胞胎": "devops 山里三本全带 forensics 后缀，正文都含「查账/取证/三层归因」家族词汇。判别轴：取证对象是什么——agent活动时间线 / 推送投递链 / 记忆库检索。地形陷阱：memory-retrieval-forensics 的 trigger 含「快照DB」，和活动取证共享 DB 词汇。",
+    "拆解六胞胎": "全库 trigger 共享「小红书/拆/调研」词汇的最大簇。判别轴：拆对象（品牌/创作者账号/平台机制）× 产出（内部文档/自家社媒内容/策略）。已知重叠：content-platform-research 与 platform-account-research 的 trigger 在「拆大号」上字面重叠（已报巡山使，待收口），control cases 按现管口径跑。",
+    "调试五胞胎": "共享 bug/修/调试词汇。判别轴：时间轴——修之前（诊断）/ 修完之后（归档修法）/ 全周期纪律框架。vibe-diagnose 已 archive 但正文仍在暗区可翻到，是「暗区≠不存在」的地形样本。"
+  },
+  "cases": [
+    {
+      "id": "F1",
+      "cluster": "forensics",
+      "query": "昨晚凌晨三点那个commit到底是谁提的？我记得我当时在睡觉",
+      "should_route": "activity-forensics",
+      "should_not_route": ["delivery-forensics", "memory-retrieval-forensics"],
+      "trap": "问的是「谁/什么时候做的」——agent活动时间线取证。delivery 管「推送没收到」不管 commit 归属；memory-retrieval 管「记忆捞不到」不管 git 考古。词汇上三本都沾「查」，判别全靠对象。"
+    },
+    {
+      "id": "F2",
+      "cluster": "forensics",
+      "query": "早报cron明明显示跑成功了，但我微信到早上十点都没收到推送",
+      "should_route": "delivery-forensics",
+      "should_not_route": ["activity-forensics", "memory-retrieval-forensics"],
+      "trap": "「cron跑没跑」是活动取证 vocabulary，但用户的真问题是投递链断在哪层（cron→信道→平台）。activity-forensics 是最强的错误吸引子。"
+    },
+    {
+      "id": "F3",
+      "cluster": "forensics",
+      "query": "上周跟hui聊的那个方案细节，现在怎么搜都搜不出来了，查一下是记忆库的问题还是本来就没存",
+      "should_route": "memory-retrieval-forensics",
+      "should_not_route": ["activity-forensics", "delivery-forensics"],
+      "trap": "「方案细节想不起来」表面像时间线问题（什么时候聊的），但取证对象是记忆库本身（快照DB/四类归因）。「什么时候聊的」这个时间状语是 activity-forensics 的诱饵。"
+    },
+    {
+      "id": "F4",
+      "cluster": "forensics",
+      "query": "查一下昨天有没有人动过生产库的表结构",
+      "should_route": "activity-forensics",
+      "should_not_route": ["memory-retrieval-forensics"],
+      "trap": "「生产库」「DB」字面命中 memory-retrieval-forensics 的「快照DB」。但取证对象是 DB 变更时间线，不是记忆检索。具体名词陷阱：数据库≠记忆库。"
+    },
+    {
+      "id": "D1",
+      "cluster": "拆解",
+      "query": "写三篇小红书帖子，主题是coffee-brand新款磨豆机的产品亮点",
+      "should_route": "varia-content",
+      "should_not_route": ["xhs-content-production", "platform-account-research", "content-platform-research"],
+      "trap": "「小红书帖子」字面最强吸引子是 xhs-content-production，但那本管 AI/Agent 领域内容，不管 coffee-brand 产品内容。对象判别：品牌产品内容≠领域自媒体内容。"
+    },
+    {
+      "id": "D2",
+      "cluster": "拆解",
+      "query": "给我们的AI agent账号想几个下周能发的小红书选题",
+      "should_route": "xhs-content-production",
+      "should_not_route": ["varia-content", "platform-account-research", "content-platform-research"],
+      "trap": "「选题」是 xhs-content-production 的正字。反例侧 varia-content 也生产内容，但领域（咖啡器具 vs AI/Agent）是硬边界。"
+    },
+    {
+      "id": "D3",
+      "cluster": "拆解",
+      "query": "拆一下XX博主是怎么三个月做到十万粉的，封面和更新节奏都拆出来",
+      "should_route": "platform-account-research",
+      "should_not_route": ["varia-content", "xhs-content-production", "category-competitive-research", "content-platform-research"],
+      "trap": "本簇最难的判别：「拆」字四本全沾。判别轴是拆的对象=创作者账号（形态/封面/钩子/节奏），不是品牌（category）、不是平台机制（content-platform）、更不是自家产出（varia/xhs 生产侧）。注：content-platform-research 的 trigger 也写了「拆大号」，按现管口径它算 can-reject 邻居——跑出它不算 hard-fail，但记 soft-hit。"
+    },
+    {
+      "id": "D4",
+      "cluster": "拆解",
+      "query": "调研一下手冲咖啡器具这个品类，市场上主要品牌都怎么定位的",
+      "should_route": "category-competitive-research",
+      "should_not_route": ["platform-account-research", "varia-content", "xhs-content-production"],
+      "trap": "「咖啡」字面强吸引 varia-content（coffee-brand=咖啡器具品牌），「调研」吸引 platform-account-research。判别轴：调研对象=品类与品牌大盘，不是自家内容生产、不是拆个人账号。"
+    },
+    {
+      "id": "D5",
+      "cluster": "拆解",
+      "query": "导出的五百人群聊天记录，帮我找出里面的KOC和常问问题",
+      "should_route": "community-user-analysis",
+      "should_not_route": ["category-competitive-research", "platform-account-research", "xhs-content-production"],
+      "trap": "「分析/画像」词汇横跨 data 山。判别轴：数据源=自有社群聊天记录（不是公开市场、不是对标账号）。「KOC」是正字，别的书没有。"
+    },
+    {
+      "id": "B1",
+      "cluster": "调试",
+      "query": "这个服务昨晚开始间歇性502，到现在还没找到病根，帮我系统排查一下",
+      "should_route": "systematic-debugging",
+      "should_not_route": ["归还术-扫描修复流程", "vibe-diagnose"],
+      "trap": "三本调试词汇全沾。判别轴：时间轴=修之前，病根未明。归还术管修完之后存修法（「到现在还没修好」是它的反词）；vibe-diagnose 已 archive，正文在暗区，翻到它=路由层把退役书当活书。"
+    },
+    {
+      "id": "B2",
+      "cluster": "调试",
+      "query": "502那个bug刚修好了，把这次的排查思路和验证命令存下来，下次直接用",
+      "should_route": "归还术-扫描修复流程",
+      "should_not_route": ["systematic-debugging", "vibe-diagnose"],
+      "trap": "同一个 502 场景换时间轴：修完之后+要归档=归还术。「排查思路」这个词会拉 systematic-debugging，但用户要的是存不是查。"
+    },
+    {
+      "id": "B3",
+      "cluster": "调试",
+      "query": "我们组vibe coding老是一上来就写代码改需求，有没有一套开工纪律可以立",
+      "should_route": "dev-disciplines",
+      "should_not_route": ["systematic-debugging", "归还术-扫描修复流程", "vibe-diagnose"],
+      "trap": "「vibe coding」+「纪律」指向 dev-disciplines（四纪律框架：Grill/TDD/Diagnose/Review）。错误吸引子是单点方法论书——用户要的是全周期框架不是某个环节的方法。"
+    },
+    {
+      "id": "N1",
+      "cluster": "阴性对照",
+      "query": "帮我看看这段中文文案翻译成英文还自然吗",
+      "should_route": "NONE",
+      "should_not_route": ["varia-content", "xhs-content-production", "humanizer"],
+      "trap": "阴性对照：全簇没有一本管「翻译润色」。若被路由到任何内容生产/文字书=触发器过松（把「文字活」当「内容生产」）。humanizer 管「去AI腔」不是翻译——首轮基线里它已实际抢走过一次，是活的诱饵。"
+    },
+    {
+      "id": "N2",
+      "cluster": "阴性对照",
+      "query": "明天下午三点提醒我去取快递",
+      "should_route": "NONE",
+      "should_not_route": ["exploration-cron", "delivery-forensics", "dayjob-support"],
+      "trap": "阴性对照：日常提醒不是 cron 设计任务（exploration-cron 管 AI 自主 cron 不管人的一次性提醒），也不是推送丢件（delivery-forensics）。「提醒」≠「定时任务设计」≠「推送排障」。"
+    }
+  ]
+}

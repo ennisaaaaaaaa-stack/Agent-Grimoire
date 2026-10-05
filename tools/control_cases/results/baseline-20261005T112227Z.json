@@ -1,0 +1,363 @@
+{
+ "ran_at_utc": "20261005T112227Z",
+ "api_model": "claude-opus-4-6",
+ "fixtures_frozen": {
+  "activity-forensics": {
+   "tags": [
+    "devops"
+   ],
+   "trigger": "用环境痕迹(git/mtime/DB)回答\"什么时候做的\"类时间线问题。用户对agent活动做时间断言时必加载。"
+  },
+  "delivery-forensics": {
+   "tags": [
+    "devops"
+   ],
+   "trigger": "用户说「没收到」某条定时推送时加载——查微信/飞书cron信丢在哪层，三层账本+静默丢弃识别+补发."
+  },
+  "memory-retrieval-forensics": {
+   "tags": [
+    "devops"
+   ],
+   "trigger": "记忆捞不到旧对话或审计Tideline可达性时用——快照DB、四类归因、广扫分身协议。"
+  },
+  "varia-content": {
+   "tags": [
+    "creative"
+   ],
+   "trigger": "coffee-brand咖啡器具品牌内容生产——产品亮点文档 + 小红书竞品水军内容 + 官方号产品知识分享帖。覆盖内部知识库文档、外部社媒竞争内容、以及官方账号科普教育内容。"
+  },
+  "xhs-content-production": {
+   "tags": [
+    "creative"
+   ],
+   "trigger": "小红书AI/Agent领域内容生产——选题发现、角度打磨、图文产出。面向\"想接触AI但不太懂\"的群体，有趣>技术，社会洞察>实用性。"
+  },
+  "content-platform-research": {
+   "tags": [
+    "creative"
+   ],
+   "trigger": "内容平台调研与定位. Use when用户说拆大号/研究平台怎么传播/新平台进分发矩阵."
+  },
+  "platform-account-research": {
+   "tags": [
+    "data"
+   ],
+   "trigger": "对标账号拆解调研。她说\"拆大号\"\"做调研\"\"别人怎么起量\"时加载。"
+  },
+  "category-competitive-research": {
+   "tags": [
+    "data"
+   ],
+   "trigger": "消费品品类竞品大盘调研方法论——品牌全景扫描、单品对标分析、品牌定位总结。适用于任何消费品品类的竞品调研项目。"
+  },
+  "community-user-analysis": {
+   "tags": [
+    "data"
+   ],
+   "trigger": "社群聊天+私聊数据分析——从企业微信/QQ群/Telegram等导出的聊天记录中提取用户画像、KOC排名、话题聚类、隐藏FAQ、流失信号、客诉处理模式、B2B线索。支持群聊CSV和私聊txt双通道分析。用户说\"分析群聊\"\"用户画像\"\"KOC筛选\"\"FAQ\"\"私聊分析\"时加载。"
+  },
+  "systematic-debugging": {
+   "tags": [
+    "software-development"
+   ],
+   "trigger": "4-phase root cause debugging: understand bugs before fixing."
+  },
+  "vibe-diagnose": {
+   "tags": [
+    ".archive",
+    ".archive/vibe-coding"
+   ],
+   "trigger": "纪律化调试循环——复现→最小化→假设→探测→修复→回归测试。适用于bug排查、性能问题、异常行为诊断。"
+  },
+  "归还术-扫描修复流程": {
+   "tags": [
+    "维修",
+    "流程"
+   ],
+   "trigger": "刚修完一个bug、想把这个修法存下来下次直接用时"
+  },
+  "dev-disciplines": {
+   "tags": [
+    "vibe-coding"
+   ],
+   "trigger": "Vibe coding 的四条纪律——动手前逼问需求(Grill)、写代码前先写测试(TDD)、修bug前先建反馈循环(Diagnose)、定期扫描架构腐化(Architecture Review)。适用于AI辅助开发全生命周期的纪律化工作流。"
+  },
+  "humanizer": {
+   "tags": [
+    "creative"
+   ],
+   "trigger": "Humanize text: strip AI-isms and add real voice."
+  },
+  "exploration-cron": {
+   "tags": [
+    "devops"
+   ],
+   "trigger": "AI cron job 设计与管理——独处时间(自主探索)、玩耍时间、内容推送cron(早报/自由探索)的配置、设计原则和产出格式。"
+  },
+  "dayjob-support": {
+   "tags": [
+    "data"
+   ],
+   "trigger": "Use when 她发来周安排/老板整顿效率/突发任务/周报周会——名目升格+暗记双视图+cron代工的主业减负流."
+  }
+ },
+ "n_cases": 14,
+ "summary": {
+  "counts": {
+   "PASS": 8,
+   "FAIL-WILD": 5,
+   "FAIL-LOOSE": 1
+  },
+  "hard_fail": 6,
+  "line": "共14题：PASS 8 / SOFT 0 / FAIL-LOOSE(松) 1 / FAIL-TIGHT(紧) 0 / FAIL-WILD(野) 5"
+ },
+ "results": [
+  {
+   "id": "F1",
+   "cluster": "forensics",
+   "query": "昨晚凌晨三点那个commit到底是谁提的？我记得我当时在睡觉",
+   "raw": "ROUTE: activity-forensics | 高 | 用户要追查特定commit的提交者和时间线，属于活动取证场景",
+   "parsed": {
+    "route": "activity-forensics",
+    "conf": "高",
+    "reason": "用户要追查特定commit的提交者和时间线，属于活动取证场景"
+   },
+   "verdict": "PASS",
+   "expect": "activity-forensics",
+   "fOrbidden": [
+    "delivery-forensics",
+    "memory-retrieval-forensics"
+   ]
+  },
+  {
+   "id": "F2",
+   "cluster": "forensics",
+   "query": "早报cron明明显示跑成功了，但我微信到早上十点都没收到推送",
+   "raw": "ROUTE: exploration-cron | 置信:高 | cron显示成功但推送未到达，属于定时任务执行链路的排查诊断",
+   "parsed": {
+    "route": "exploration-cron",
+    "conf": "置信:高",
+    "reason": "cron显示成功但推送未到达，属于定时任务执行链路的排查诊断"
+   },
+   "verdict": "FAIL-WILD",
+   "expect": "delivery-forensics",
+   "fOrbidden": [
+    "activity-forensics",
+    "memory-retrieval-forensics"
+   ]
+  },
+  {
+   "id": "F3",
+   "cluster": "forensics",
+   "query": "上周跟hui聊的那个方案细节，现在怎么搜都搜不出来了，查一下是记忆库的问题还是本来就没存",
+   "raw": "ROUTE: memory-retrieval-forensics",
+   "parsed": {
+    "route": "memory-retrieval-forensics",
+    "conf": "",
+    "reason": ""
+   },
+   "verdict": "PASS",
+   "expect": "memory-retrieval-forensics",
+   "fOrbidden": [
+    "activity-forensics",
+    "delivery-forensics"
+   ]
+  },
+  {
+   "id": "F4",
+   "cluster": "forensics",
+   "query": "查一下昨天有没有人动过生产库的表结构",
+   "raw": "ROUTE: activity-forensics | 中 | 用户要追查生产库表结构变更记录，属于活动取证类操作",
+   "parsed": {
+    "route": "activity-forensics",
+    "conf": "中",
+    "reason": "用户要追查生产库表结构变更记录，属于活动取证类操作"
+   },
+   "verdict": "PASS",
+   "expect": "activity-forensics",
+   "fOrbidden": [
+    "memory-retrieval-forensics"
+   ]
+  },
+  {
+   "id": "D1",
+   "cluster": "拆解",
+   "query": "写三篇小红书帖子，主题是coffee-brand新款磨豆机的产品亮点",
+   "raw": "ROUTE: xhs-content-production | 高 | 用户要求写小红书帖子且主题涉及coffee-brand产品，与creative下xhs-content-production直接对应",
+   "parsed": {
+    "route": "xhs-content-production",
+    "conf": "高",
+    "reason": "用户要求写小红书帖子且主题涉及coffee-brand产品，与creative下xhs-content-production直接对应"
+   },
+   "verdict": "FAIL-LOOSE",
+   "expect": "varia-content",
+   "fOrbidden": [
+    "xhs-content-production",
+    "platform-account-research",
+    "content-platform-research"
+   ]
+  },
+  {
+   "id": "D2",
+   "cluster": "拆解",
+   "query": "给我们的AI agent账号想几个下周能发的小红书选题",
+   "raw": "ROUTE: GET /skill/xhs-content-production",
+   "parsed": {
+    "route": "GET /skill/xhs-content-production",
+    "conf": "",
+    "reason": ""
+   },
+   "verdict": "FAIL-WILD",
+   "expect": "xhs-content-production",
+   "fOrbidden": [
+    "varia-content",
+    "platform-account-research",
+    "content-platform-research"
+   ]
+  },
+  {
+   "id": "D3",
+   "cluster": "拆解",
+   "query": "拆一下XX博主是怎么三个月做到十万粉的，封面和更新节奏都拆出来",
+   "raw": "ROUTE: platform-account-research",
+   "parsed": {
+    "route": "platform-account-research",
+    "conf": "",
+    "reason": ""
+   },
+   "verdict": "PASS",
+   "expect": "platform-account-research",
+   "fOrbidden": [
+    "varia-content",
+    "xhs-content-production",
+    "category-competitive-research",
+    "content-platform-research"
+   ]
+  },
+  {
+   "id": "D4",
+   "cluster": "拆解",
+   "query": "调研一下手冲咖啡器具这个品类，市场上主要品牌都怎么定位的",
+   "raw": "ROUTE: category-competitive-research | 置信(高) | 用户要调研\"手冲咖啡器具\"品类的品牌定位，匹配品类竞争研究",
+   "parsed": {
+    "route": "category-competitive-research",
+    "conf": "置信(高)",
+    "reason": "用户要调研\"手冲咖啡器具\"品类的品牌定位，匹配品类竞争研究"
+   },
+   "verdict": "PASS",
+   "expect": "category-competitive-research",
+   "fOrbidden": [
+    "platform-account-research",
+    "varia-content",
+    "xhs-content-production"
+   ]
+  },
+  {
+   "id": "D5",
+   "cluster": "拆解",
+   "query": "导出的五百人群聊天记录，帮我找出里面的KOC和常问问题",
+   "raw": "ROUTE: community-user-analysis | 置信(高) | 群聊记录分析找KOC和常见问题，与用户社群分析直接匹配",
+   "parsed": {
+    "route": "community-user-analysis",
+    "conf": "置信(高)",
+    "reason": "群聊记录分析找KOC和常见问题，与用户社群分析直接匹配"
+   },
+   "verdict": "PASS",
+   "expect": "community-user-analysis",
+   "fOrbidden": [
+    "category-competitive-research",
+    "platform-account-research",
+    "xhs-content-production"
+   ]
+  },
+  {
+   "id": "B1",
+   "cluster": "调试",
+   "query": "这个服务昨晚开始间歇性502，到现在还没找到病根，帮我系统排查一下",
+   "raw": "ROUTE: GET /tag/devops",
+   "parsed": {
+    "route": "GET /tag/devops",
+    "conf": "",
+    "reason": ""
+   },
+   "verdict": "FAIL-WILD",
+   "expect": "systematic-debugging",
+   "fOrbidden": [
+    "归还术-扫描修复流程",
+    "vibe-diagnose"
+   ]
+  },
+  {
+   "id": "B2",
+   "cluster": "调试",
+   "query": "502那个bug刚修好了，把这次的排查思路和验证命令存下来，下次直接用",
+   "raw": "ROUTE: GET /skill/systematic-debugging",
+   "parsed": {
+    "route": "GET /skill/systematic-debugging",
+    "conf": "",
+    "reason": ""
+   },
+   "verdict": "FAIL-WILD",
+   "expect": "归还术-扫描修复流程",
+   "fOrbidden": [
+    "systematic-debugging",
+    "vibe-diagnose"
+   ]
+  },
+  {
+   "id": "B3",
+   "cluster": "调试",
+   "query": "我们组vibe coding老是一上来就写代码改需求，有没有一套开工纪律可以立",
+   "raw": "ROUTE: GET /skill/dev-disciplines",
+   "parsed": {
+    "route": "GET /skill/dev-disciplines",
+    "conf": "",
+    "reason": ""
+   },
+   "verdict": "FAIL-WILD",
+   "expect": "dev-disciplines",
+   "fOrbidden": [
+    "systematic-debugging",
+    "归还术-扫描修复流程",
+    "vibe-diagnose"
+   ]
+  },
+  {
+   "id": "N1",
+   "cluster": "阴性对照",
+   "query": "帮我看看这段中文文案翻译成英文还自然吗",
+   "raw": "ROUTE: NONE | 高 | 用户需要中英翻译润色，经图中没有翻译相关技能",
+   "parsed": {
+    "route": "NONE",
+    "conf": "高",
+    "reason": "用户需要中英翻译润色，经图中没有翻译相关技能"
+   },
+   "verdict": "PASS",
+   "expect": "NONE",
+   "fOrbidden": [
+    "varia-content",
+    "xhs-content-production",
+    "humanizer",
+    "creative-design"
+   ]
+  },
+  {
+   "id": "N2",
+   "cluster": "阴性对照",
+   "query": "明天下午三点提醒我去取快递",
+   "raw": "ROUTE: NONE | 高 | 经图覆盖内容创作/数据分析/开发/运维/诊断，不含日程提醒或时间管理功能",
+   "parsed": {
+    "route": "NONE",
+    "conf": "高",
+    "reason": "经图覆盖内容创作/数据分析/开发/运维/诊断，不含日程提醒或时间管理功能"
+   },
+   "verdict": "PASS",
+   "expect": "NONE",
+   "fOrbidden": [
+    "exploration-cron",
+    "delivery-forensics",
+    "dayjob-support"
+   ]
+  }
+ ]
+}

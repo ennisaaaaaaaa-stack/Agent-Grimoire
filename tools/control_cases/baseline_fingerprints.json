@@ -1,0 +1,106 @@
+{
+ "comment": "基线指纹：control cases 覆盖的书本的路由指纹（trigger+tags）。改指纹/改地图后有意变更时，跑 baseline 验证新指纹路由质量，过了再 fingerprint --rebase 重新盖章。",
+ "captured_at_utc": "2026-10-05T11:19:53Z",
+ "fingerprint_sha256": "09a62315757e3aac4d502ec4fa1dc5e6515c962b0bffb9c617a188b96a898c54",
+ "capture_command": "python3 tools/control_cases/run.py fingerprint --rebase",
+ "skills": {
+  "activity-forensics": {
+   "tags": [
+    "devops"
+   ],
+   "trigger": "用环境痕迹(git/mtime/DB)回答\"什么时候做的\"类时间线问题。用户对agent活动做时间断言时必加载。"
+  },
+  "delivery-forensics": {
+   "tags": [
+    "devops"
+   ],
+   "trigger": "用户说「没收到」某条定时推送时加载——查微信/飞书cron信丢在哪层，三层账本+静默丢弃识别+补发."
+  },
+  "memory-retrieval-forensics": {
+   "tags": [
+    "devops"
+   ],
+   "trigger": "记忆捞不到旧对话或审计Tideline可达性时用——快照DB、四类归因、广扫分身协议。"
+  },
+  "varia-content": {
+   "tags": [
+    "creative"
+   ],
+   "trigger": "coffee-brand咖啡器具品牌内容生产——产品亮点文档 + 小红书竞品水军内容 + 官方号产品知识分享帖。覆盖内部知识库文档、外部社媒竞争内容、以及官方账号科普教育内容。"
+  },
+  "xhs-content-production": {
+   "tags": [
+    "creative"
+   ],
+   "trigger": "小红书AI/Agent领域内容生产——选题发现、角度打磨、图文产出。面向\"想接触AI但不太懂\"的群体，有趣>技术，社会洞察>实用性。"
+  },
+  "content-platform-research": {
+   "tags": [
+    "creative"
+   ],
+   "trigger": "内容平台调研与定位. Use when用户说拆大号/研究平台怎么传播/新平台进分发矩阵."
+  },
+  "platform-account-research": {
+   "tags": [
+    "data"
+   ],
+   "trigger": "对标账号拆解调研。她说\"拆大号\"\"做调研\"\"别人怎么起量\"时加载。"
+  },
+  "category-competitive-research": {
+   "tags": [
+    "data"
+   ],
+   "trigger": "消费品品类竞品大盘调研方法论——品牌全景扫描、单品对标分析、品牌定位总结。适用于任何消费品品类的竞品调研项目。"
+  },
+  "community-user-analysis": {
+   "tags": [
+    "data"
+   ],
+   "trigger": "社群聊天+私聊数据分析——从企业微信/QQ群/Telegram等导出的聊天记录中提取用户画像、KOC排名、话题聚类、隐藏FAQ、流失信号、客诉处理模式、B2B线索。支持群聊CSV和私聊txt双通道分析。用户说\"分析群聊\"\"用户画像\"\"KOC筛选\"\"FAQ\"\"私聊分析\"时加载。"
+  },
+  "systematic-debugging": {
+   "tags": [
+    "software-development"
+   ],
+   "trigger": "4-phase root cause debugging: understand bugs before fixing."
+  },
+  "vibe-diagnose": {
+   "tags": [
+    ".archive",
+    ".archive/vibe-coding"
+   ],
+   "trigger": "纪律化调试循环——复现→最小化→假设→探测→修复→回归测试。适用于bug排查、性能问题、异常行为诊断。"
+  },
+  "归还术-扫描修复流程": {
+   "tags": [
+    "维修",
+    "流程"
+   ],
+   "trigger": "刚修完一个bug、想把这个修法存下来下次直接用时"
+  },
+  "dev-disciplines": {
+   "tags": [
+    "vibe-coding"
+   ],
+   "trigger": "Vibe coding 的四条纪律——动手前逼问需求(Grill)、写代码前先写测试(TDD)、修bug前先建反馈循环(Diagnose)、定期扫描架构腐化(Architecture Review)。适用于AI辅助开发全生命周期的纪律化工作流。"
+  },
+  "humanizer": {
+   "tags": [
+    "creative"
+   ],
+   "trigger": "Humanize text: strip AI-isms and add real voice."
+  },
+  "exploration-cron": {
+   "tags": [
+    "devops"
+   ],
+   "trigger": "AI cron job 设计与管理——独处时间(自主探索)、玩耍时间、内容推送cron(早报/自由探索)的配置、设计原则和产出格式。"
+  },
+  "dayjob-support": {
+   "tags": [
+    "data"
+   ],
+   "trigger": "Use when 她发来周安排/老板整顿效率/突发任务/周报周会——名目升格+暗记双视图+cron代工的主业减负流."
+  }
+ }
+}
