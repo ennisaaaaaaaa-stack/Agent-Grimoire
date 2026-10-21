@@ -286,6 +286,50 @@ check("merge后旧别名仍可查(迁到新tag)", s == 200 and "归还术" in b,
 s, b = get("/tag/修缮")
 check("新tag自身可查(山头已种)", s == 200 and "归还术" in b, b[:120])
 
+# 15. auto/ 新兵区 (钉一注入平权 + 钉二通道闸) — 三分位对账定案的落地
+#     照照规格: 注入面四件套对 status='draft' 全硬过滤 → auto/过闸新兵入馆即
+#     shadow, 一次被注入机会都没有 (KiroCrew死法)。两颗钉: 注入平权 + 通道圈死。
+s, b = post("/skill", {"operator": "smoke", "name": "auto/烟测新兵",
+                       "tags": ["维修"], "body": "# 烟测新兵\nauto通道正门应拒收。"})
+check("正式口拒收auto/前缀(钉二)", s == 403 and "skill-gate" in b, f"{s} {b[:100]}")
+s, b = post("/skill/auto", {"operator": "smoke", "name": "auto/烟测新兵",
+                            "tags": ["维修"], "trigger": "auto区烟测书",
+                            "body": "# 烟测新兵\nauto通道进馆。四道闸校验在壳侧, "
+                                    "这里只收auto/前缀并记skill.auto.submit。"})
+check("闸门口收auto/并落库(200+channel)", s == 200 and json.loads(b)["channel"] == "auto",
+      f"{s} {b[:150]}")
+s, b = post("/skill/auto", {"operator": "smoke", "name": "非auto名字",
+                            "tags": [], "body": "# x\n闸门口应只收auto/。"})
+check("闸门口拒收非auto/名字(400)", s == 400 and "POST /skill" in b, f"{s} {b[:100]}")
+s, b = get("/map")
+check("经图带auto/新兵名字+独立段(钉一)", s == 200 and "auto/烟测新兵" in b
+      and "[auto·未过审]" in b, b[:120] if s != 200 else
+      next((l for l in b.splitlines() if "auto" in l), "")[:120])
+s, b = get("/skill/auto/烟测新兵")
+check("auto书免审阅头直读(钉一)", s == 200 and "# 烟测新兵" in b, f"{s} {b[:100]}")
+s, b = get("/tag/维修")
+check("/tag列表带auto标记(钉一)", s == 200 and "auto/烟测新兵" in b
+      and "[auto·未过审]" in b, f"{s} {b[:150]}")
+# 15.5 red挡注入: 带red报告的auto书不进注入面(R3精神: red不注入)
+red_name = "auto/烟测red兵"
+s, b = post("/skill/auto", {"operator": "smoke", "name": red_name,
+                            "tags": ["维修"],
+                            "body": "# red兵\n探测路径: /etc/passwd 属越界读。"})
+_red_json = json.loads(b)
+check("带red的auto书: 落库200+scan带red", s == 200 and _red_json["scan"]["count"] >= 1,
+      f"{s} {b[:150]}")
+s, b = get("/map")
+check("带red的auto书不进经图(注入面)", "auto/烟测red兵" not in b, "red兵混进经图了")
+s, b = get(f"/skill/{red_name}")
+check("带red的auto书读面照开+red横幅", s == 200 and "⚠️" in b and "red" in b,
+      f"{s} {b[:120]}")
+# 15.6 收尾: 两本auto兵撤回, 正式区探针书也撤回, 库面干净
+for _n in ("auto/烟测新兵", red_name):
+    post("/event", {"kind": "skill.pool.withdraw", "operator": "smoke",
+                    "skill_id": _n})
+s, b = get("/map")
+check("撤收后经图无auto残留", "auto/烟测" not in b, "auto残留")
+
 fails = [r for r in results if not r[1]]
 print(f"\n{len(results) - len(fails)}/{len(results)} 绿")
 sys.exit(1 if fails else 0)

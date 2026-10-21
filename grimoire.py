@@ -146,7 +146,8 @@ def render_map(operator: str = "unknown"):
             "SELECT s.name, s.layer, f.value AS tags "
             "FROM skills s LEFT JOIN skill_fields f "
             "ON f.skill_id = s.skill_id AND f.field = 'tags' "
-            "WHERE s.status = 'verified' AND s.layer != 'archive'" + vis_clause +
+            "WHERE s.layer != 'archive' AND "
+            + injectable_predicate("s") + vis_clause +
             " ORDER BY s.name", vis_args).fetchall()
         by_tag = {}
         for m in rows(mapping):
@@ -231,8 +232,8 @@ def render_map(operator: str = "unknown"):
             "SELECT s.name, s.layer, f.value AS tags "
             "FROM skills s LEFT JOIN skill_fields f "
             "ON f.skill_id = s.skill_id AND f.field = 'tags' "
-            "WHERE s.status = 'verified' AND s.layer != 'archive'"
-            + vis_clause +
+            "WHERE s.layer != 'archive' AND "
+            + injectable_predicate("s") + vis_clause +
             " ORDER BY s.name", vis_args).fetchall()
         if mapping:
             by_tag = {}
@@ -243,15 +244,40 @@ def render_map(operator: str = "unknown"):
             for t in sorted(by_tag):
                 lines.append(f"{t}: {', '.join(by_tag[t])}")
             lines.append("")
-        # R3: draft不在默认经图露脸 — 想看draft(含red横幅)走X-Review-Draft头
+        # 钉一: auto/新兵独立段 — 带名字进注入面(平权)。名字可露的依据:
+        # auto/过了skill-gate四道闸+入关三面扫描才进馆, 与裸draft(可能带恶意名
+        # 塞攻击串)不同信任级。每本带tag归属+trigger首行, 注入面即自述面。
+        # red报告的auto书不进(同injectable_predicate, 夹具15.5抓过漏网)。
+        auto_rows = con.execute(
+            "SELECT s.name, s.layer, f.value AS tags "
+            "FROM skills s LEFT JOIN skill_fields f "
+            "ON f.skill_id = s.skill_id AND f.field = 'tags' "
+            "WHERE s.status = 'draft' AND s.name LIKE 'auto/%' "
+            "AND NOT EXISTS (SELECT 1 FROM scan_reports sr "
+            "WHERE sr.skill_id = s.skill_id AND sr.severity = 'red') "
+            "ORDER BY s.name").fetchall()
+        if auto_rows:
+            auto_tagged = []
+            for m in rows(auto_rows):
+                tl = json.loads(m["tags"]) if m["tags"] else []
+                auto_tagged.append((m["name"], tl))
+            lines.append(f"## [auto·未过审]({len(auto_rows)}本, 新兵区, "
+                         "skill-gate过闸出身; 转正判据挂use层)")
+            for nm, tl in auto_tagged:
+                tags_txt = f"  [{', '.join(tl)}]" if tl else ""
+                lines.append(f"  {nm}{tags_txt}")
+            lines.append("  (GET /skill/<name> 直读, 免审阅头; "
+                         "转正裁决: promotion-scanner + 巡山使)")
+            lines.append("")
+        # R3: draft不在默认经图露脸 — 想看draft(含red横幅)待审区数量照报
         drafts = con.execute(
-            "SELECT name FROM skills WHERE status='draft' "
-            "ORDER BY name").fetchall()
+            "SELECT count(*) FROM skills WHERE status='draft' "
+            "AND name NOT LIKE 'auto/%'").fetchone()
         if drafts:
             # R3补丁: 只报数量不列名字 — 经图是每session注入面,
             # 列名字=攻击者可用skill名往所有agent上下文里塞任意串
             lines.append(
-                f"## 待审区({len(drafts)}本draft, 不进默认经图; "
+                f"## 待审区({drafts[0]}本draft, 不进默认经图; "
                 "名单走/darkzone, 审阅带X-Review-Draft头GET /skill/<name>)")
             lines.append("")
         return "\n".join(lines)
@@ -438,6 +464,17 @@ def visible_skills_clause(operator: str, alias: str = "s") -> tuple:
     )
 
 
+def injectable_predicate(alias: str = "s") -> str:
+    """钉一(auto平权): 注入面收录判据 — verified全书 + 干净的auto/新兵(draft)。
+    auto/ = skill-gate闸门通道出身(POST /skill/auto, 四道闸校验后落库),
+    过闸即享注入平权(KiroCrew死法 = 新兵入馆即shadow, 一次被注入机会都没有)。
+    带red报告的auto书不进注入面(R3精神: red不注入; 读面照开走get_skill)。"""
+    return (f"({alias}.status = 'verified' OR ({alias}.status = 'draft' "
+            f"AND {alias}.name LIKE 'auto/%' AND NOT EXISTS ("
+            f"  SELECT 1 FROM scan_reports sr WHERE sr.skill_id = {alias}.skill_id"
+            f"  AND sr.severity = 'red')))")
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -470,7 +507,8 @@ class Handler(BaseHTTPRequestHandler):
         m = re.match(r"^/tag/([^/]+)$", self.path)
         if m:
             return self.get_tag(urllib.parse.unquote(m.group(1)))
-        m = re.match(r"^/skill/([^/]+)$", self.path)
+        # 钉一配套: 名字可含斜杠(auto/前缀) — [^/]+ 吞不了 auto/xxx, 放宽为 .+
+        m = re.match(r"^/skill/(.+)$", self.path)
         if m:
             return self.get_skill(urllib.parse.unquote(m.group(1)))
         return self.send_text(404, "not found")
@@ -574,8 +612,8 @@ class Handler(BaseHTTPRequestHandler):
                     "SELECT s.skill_id, s.name, s.layer, s.status, f.value AS tags "
                     "FROM skills s LEFT JOIN skill_fields f "
                     "ON f.skill_id = s.skill_id AND f.field = 'tags' "
-                    "WHERE s.status = 'verified' AND s.layer != 'archive'"
-                    + vis_clause +
+                    "WHERE s.layer != 'archive' AND "
+                    + injectable_predicate("s") + vis_clause +
                     " ORDER BY s.name", vis_args).fetchall()):
                 taglist = json.loads(r["tags"]) if r["tags"] else []
                 if tag in taglist or tag in [t.lower() for t in taglist]:
@@ -586,7 +624,10 @@ class Handler(BaseHTTPRequestHandler):
                     desc = ""
                     if trig and trig["value"]:
                         desc = trig["value"].splitlines()[0][:120]
-                    out.append(f"{r['name']}  [{r['layer']}/{r['status']}]  {desc}")
+                    # 钉一: auto/新兵带标记上榜(平权但身份可见)
+                    mark = "  [auto·未过审]" if r["name"].startswith("auto/") else ""
+                    out.append(f"{r['name']}  [{r['layer']}/{r['status']}]"
+                               f"{mark}  {desc}")
             if not out:
                 return self.send_text(404, f"tag '{tag}' 下暂无在馆条目")
             return self.send_text(
@@ -716,7 +757,11 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT COUNT(*) FROM scan_reports WHERE skill_id=? "
                 "AND severity='red'", (row["skill_id"],)).fetchone()[0]
             if row["status"] == "draft" and \
-                    not self.headers.get("X-Review-Draft"):
+                    not self.headers.get("X-Review-Draft") and \
+                    not row["name"].startswith("auto/"):
+                # 钉一: auto/新兵免审阅头直读 — 过闸出身的draft是注入面正式住户,
+                # 读它不需要钥匙(注入面都看得见的东西, 单读面反而上锁=自相矛盾)。
+                # red横幅照挂(banner段), 带red的auto书不进注入面但读面开着。
                 return self.send_text(
                     403, f"该skill是draft(未过审): {skill_id} — "
                          "默认读面不放行。带X-Review-Draft头进入审阅模式"
@@ -751,9 +796,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.post_event()
         if self.path == "/skill":
             return self.post_skill()
+        if self.path == "/skill/auto":
+            return self.post_skill(channel="auto")
         if self.path == "/tool":
             return self.post_tool()
-        return self.send_text(404, "endpoints: POST /event, POST /skill, POST /tool")
+        return self.send_text(404, "endpoints: POST /event, POST /skill, "
+                                   "POST /skill/auto, POST /tool")
 
     def post_tool(self):
         """工具层分区 (v0.3) 写口。两种动作:
@@ -1107,7 +1155,7 @@ class Handler(BaseHTTPRequestHandler):
 
         return 500, {"error": f"unhandled kind: {kind}"}
 
-    def post_skill(self):
+    def post_skill(self, channel="formal"):
         try:
             body = self.read_json()
         except ValueError as e:
@@ -1116,6 +1164,16 @@ class Handler(BaseHTTPRequestHandler):
         if not name or not str(name).strip():
             return self.send_text(400, "缺name")
         name = str(name).strip()  # 同名挡前後空格繞過: 入庫前 strip 一刀 (zhaozhao觀察項4)
+        # 钉二(auto通道闸): auto/ 前缀=skill-gate四道闸专属通道的通行凭证。
+        # 正式提交通道对 auto/ 圈死403 — auto/只能从壳侧闸进(四道闸校验+过闸降amber),
+        # 正式区只装正式通道的东西, 审写分离不动。闸门侧POST /skill/auto只收auto/。
+        if channel != "auto" and name.startswith("auto/"):
+            return self.send_text(
+                403, f"auto/ 前缀保留给 skill-gate 闸门通道: {name} — "
+                     "正式提交口不收 auto/。走壳侧 skill-gate 或 POST /skill/auto")
+        if channel == "auto" and not name.startswith("auto/"):
+            return self.send_text(
+                400, f"闸门通道只收 auto/ 前缀: {name} — 正式提交走 POST /skill")
         tags_list = body.get("tags") or []
         skill_body = body.get("body") or ""
         con = db()
@@ -1166,7 +1224,7 @@ class Handler(BaseHTTPRequestHandler):
                     "INSERT INTO events(ts, operator, kind, payload) "
                     "VALUES(?,?,?,?)",
                     (now(), body.get("operator") or body.get("author") or "unknown",
-                     "skill.pool.submit",
+                     "skill.auto.submit" if channel == "auto" else "skill.pool.submit",
                      json.dumps({"skill_id": sid, "name": name,
                                  "tags": tags_list,
                                  "scan_findings": len(findings)},
@@ -1182,6 +1240,7 @@ class Handler(BaseHTTPRequestHandler):
                 con.commit()
                 resp = {"skill_id": sid, "status": "draft",
                         "layer": "index",
+                        "channel": channel,
                         "scan": {"count": len(findings)}}
                 if tag_hints:
                     resp["tag_hints"] = tag_hints
