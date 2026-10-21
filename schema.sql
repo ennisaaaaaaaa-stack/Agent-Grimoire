@@ -52,7 +52,9 @@ CREATE TABLE IF NOT EXISTS events (
   event_id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts       TEXT NOT NULL,
   operator TEXT NOT NULL,
-  kind     TEXT NOT NULL,                  -- skill.submit / skill.push / skill.expand / skill.description.rewrite
+  kind     TEXT NOT NULL,                  -- skill.submit / skill.push / skill.expand / skill.description.rewrite / skill.use / skill.inject
+                                          --   skill.use/skill.inject(T23): 读面内部落账 — GET /skill 命中记use, GET /map 记inject;
+                                          --   use语义=取用代理指标非用上了; 不进EVENT_KINDS, POST /event不可伪造
   payload  TEXT NOT NULL                   -- JSON; rewrite 事件携带 baseline_hash
 );
 

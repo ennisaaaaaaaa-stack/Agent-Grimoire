@@ -3,6 +3,8 @@
 
 读脸（session开局拉）: GET /map, GET /tag/<tag>, GET /skill/<id>
 写脸（遥测落账）:      POST /event
+读脸自带记账(T23):     GET /skill 命中落 skill.use, GET /map 落 skill.inject
+                        (use=取用代理指标非用上了; 内部落账不经POST /event)
 提交（draft起步）:     POST /skill — 三面扫描报告挂上, 只记不拦
 
 依据: portalk-contract-skill-lifecycle v0.2
@@ -134,7 +136,7 @@ def rows(rows_or_none):
 
 # ---------------- 经图 (opening map) ----------------
 
-def render_map(operator: str = "unknown"):
+def render_map(operator: str = "unknown", log_inject: bool = True):
     con = db()
     try:
         tags = con.execute(
@@ -280,7 +282,22 @@ def render_map(operator: str = "unknown"):
                 f"## 待审区({drafts[0]}本draft, 不进默认经图; "
                 "名单走/darkzone, 审阅带X-Review-Draft头GET /skill/<name>)")
             lines.append("")
-        return "\n".join(lines)
+        text = "\n".join(lines)
+        # 写面(T23): 开场注入落账 skill.inject — 经图被拉取一次记一笔。
+        # inject语义=经图注入量的代理指标(拉了≠注入成功≠被用上)。
+        # 与skill.checkin.scan同律: 服务端内部落账, 不进EVENT_KINDS —
+        # POST /event不可伪造注入量。get_stats内部渲染是量尺不是注入
+        # (log_inject=False), 否则每次读/stats都虚增inject账。
+        if log_inject:
+            with _lock:
+                con.execute(
+                    "INSERT INTO events(ts, operator, kind, payload) "
+                    "VALUES(?,?,?,?)",
+                    (now(), operator, "skill.inject",
+                     json.dumps({"map_bytes": len(text.encode("utf-8"))},
+                                ensure_ascii=False)))
+                con.commit()
+        return text
     finally:
         con.close()
 
@@ -589,8 +606,9 @@ class Handler(BaseHTTPRequestHandler):
                     weak += 1
             total = con.execute(
                 "SELECT COUNT(*) FROM events").fetchone()[0]
+            # T23: 量尺不算注入 — 内部渲染禁落inject账(见render_map写面注释)
             out = [f"暗区数量: {dark}",
-                   f"经图字节数: {len(render_map().encode())}",
+                   f"经图字节数: {len(render_map(log_inject=False).encode())}",
                    f"弱trigger数: {weak}",
                    f"事件总数: {total}"]
             if since:
@@ -787,6 +805,21 @@ class Handler(BaseHTTPRequestHandler):
             tail = ("\n\n---\n用完顺手记一笔: POST /event "
                     '{"kind":"skill.telemetry.expand","operator":"<你>","skill_id":"'
                     f'{row["name"]}' + '"} — 好用/没用, 你判断.)')
+            # 写面(T23): 门后取用落账 skill.use — 上方404(含装404)/410/403
+            # 全部提前return, 走到这里=过了全部可见性门、即将200的那次取用。
+            # use语义钉死: 取用代理指标, 非用上了(取了≠用了; 真实用效仍靠尾行
+            # skill.telemetry.expand自觉报)。auto/转正判据挂的就是这层。
+            # 与skill.checkin.scan同律: 内部落账不进EVENT_KINDS, POST /event
+            # 不可伪造use数。不合并不幂等 — use计数就是要数次数。
+            with _lock:
+                con.execute(
+                    "INSERT INTO events(ts, operator, kind, payload) "
+                    "VALUES(?,?,?,?)",
+                    (now(), self.operator, "skill.use",
+                     json.dumps({"skill_id": row["skill_id"],
+                                 "name": row["name"]},
+                                ensure_ascii=False)))
+                con.commit()
             return self.send_text(200, banner + head + row["body"] + tail)
         finally:
             con.close()
